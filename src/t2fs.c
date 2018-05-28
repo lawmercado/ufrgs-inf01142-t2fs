@@ -3,10 +3,106 @@
 #include "../include/apidisk.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-struct t2fs_superbloco *superblock;
+#define OP_SUCCESS 0
+#define OP_ERROR -1
 
-int read_superbloco()
+#define MAX_NUM_HANDLERS 10
+
+#define FILENAME_SIZE 58
+
+/*-----------------------------------------------------------------------------
+Flag de inicialização da biblioteca
+-----------------------------------------------------------------------------*/
+int g_initialized = 0;
+
+/*-----------------------------------------------------------------------------
+Superbloco do disco
+-----------------------------------------------------------------------------*/
+struct t2fs_superbloco *g_sb;
+
+/*-----------------------------------------------------------------------------
+Inode associado ao diretório raiz
+-----------------------------------------------------------------------------*/
+struct t2fs_inode *g_ri;
+
+/*-----------------------------------------------------------------------------
+Handlers dos arquivos.
+-----------------------------------------------------------------------------*/
+FILE_HANDLER g_files[MAX_NUM_HANDLERS];
+
+/*-----------------------------------------------------------------------------
+Handlers dos diretórios.
+-----------------------------------------------------------------------------*/
+DIR_HANDLER g_dirs[MAX_NUM_HANDLERS];
+
+char *g_cwd;
+
+/*-----------------------------------------------------------------------------
+Função: Dado um buffer, lê um valor inteiro do mesmo (expresso em Little Endian)
+
+Entra:
+    buffer -> buffer com os valores
+    start -> índice onde começa o valor no buffer
+	size -> tamanho do valor a ser lido
+
+Saída:
+    Se a operação foi realizada com sucesso, retorna OP_SUCCESS
+    Se ocorreu algum erro, retorna OP_ERROR.
+-----------------------------------------------------------------------------*/
+int __get_value_from_buffer(unsigned char *buffer, int start, int size)
+{
+    int i = 0;
+    unsigned int value = 0;
+
+    for( i = 0; i < size; i++ )
+    {
+        value += buffer[start + i] << (i*8);
+    }
+
+    return value;
+}
+
+/*-----------------------------------------------------------------------------
+Função: Encontra o ponteiro assoc. ao inodeNumber informado
+
+Entra:
+    inodeNumber -> número do inode a ser encontrado
+
+Saída:
+    Se a operação foi realizada com sucesso, retorna o inode
+    Se ocorreu algum erro, retorna NULL
+-----------------------------------------------------------------------------*/
+struct t2fs_inode* __get_inode(int inodeNumber)
+{
+    unsigned char buffer[SECTOR_SIZE];
+    unsigned int sector_rootInode = ((g_sb->superblockSize + g_sb->freeBlocksBitmapSize + g_sb->freeInodeBitmapSize) * g_sb->blockSize);
+    struct t2fs_inode *inode = NULL;
+
+    if( read_sector(sector_rootInode + inodeNumber, buffer) == 0 )
+    {
+        inode = (struct t2fs_inode*)malloc(sizeof(struct t2fs_inode));
+
+        inode->blocksFileSize = __get_value_from_buffer(buffer, 0, 4);
+        inode->bytesFileSize = __get_value_from_buffer(buffer, 4, 4);
+        inode->dataPtr[0] = __get_value_from_buffer(buffer, 8, 4);
+        inode->dataPtr[1] = __get_value_from_buffer(buffer, 12, 4);
+        inode->singleIndPtr = __get_value_from_buffer(buffer, 16, 4);
+        inode->doubleIndPtr = __get_value_from_buffer(buffer, 20, 4);
+    }
+
+    return inode;
+}
+
+/*-----------------------------------------------------------------------------
+Função: Realiza a leitura do superbloco do disco
+
+Saída:
+    Se a operação foi realizada com sucesso, retorna OP_SUCCESS
+    Se ocorreu algum erro, retorna OP_ERROR.
+-----------------------------------------------------------------------------*/
+int __read_superblock()
 {
     int i;
     unsigned char buffer[SECTOR_SIZE];
@@ -14,43 +110,94 @@ int read_superbloco()
 
     if( read_sector(sector_superblock, buffer) != 0 )
     {
-        return -1;
+        return OP_ERROR;
     }
 
-    superblock = (struct t2fs_superbloco*)malloc(sizeof(struct t2fs_superbloco));
+    g_sb = (struct t2fs_superbloco*)malloc(sizeof(struct t2fs_superbloco));
 
     printf("Superblock reading: \n");
 
+    printf("ID: ");
     for( i = 0; i < 4; i++ )
     {
-        superblock->id[i] = (char)buffer[i];
+        g_sb->id[i] = (char)buffer[i];
+        printf("%c", g_sb->id[i]);
     }
 
-    printf("ID: %s\n", superblock->id);
+    printf("\n");
 
-    superblock->version = buffer[5]*256 + buffer[4];
-    printf("Version: 0x%.4x (0x7e2 = 2018; 1 = first semester)\n", superblock->version);
+    g_sb->version = __get_value_from_buffer(buffer, 4, 2);
+    g_sb->superblockSize = __get_value_from_buffer(buffer, 6, 2);
+    g_sb->freeBlocksBitmapSize = __get_value_from_buffer(buffer, 8, 2);
+    g_sb->freeInodeBitmapSize = __get_value_from_buffer(buffer, 10, 2);
+    g_sb->inodeAreaSize = __get_value_from_buffer(buffer, 12, 2);
+    g_sb->blockSize = __get_value_from_buffer(buffer, 14, 2);
+    g_sb->diskSize = __get_value_from_buffer(buffer, 16, 4);
 
-    superblock->superblockSize = buffer[7]*256 + buffer[6];
-    printf ("SuperBlockSize: %d logical sectors\n", superblock->superblockSize);
+    printf("Version: 0x%.4x (0x7e2 = 2018; 1 = first semester)\n", g_sb->version);
+    printf ("SuperBlockSize: %d logical sectors\n", g_sb->superblockSize);
+    printf ("FreeBlocksBitmapSize: %d blocks\n", g_sb->freeBlocksBitmapSize);
+    printf ("FreeInodeBitmapSize: %d blocks\n", g_sb->freeInodeBitmapSize);
+    printf ("InodeAreaSize: %d blocks\n", g_sb->inodeAreaSize);
+    printf ("BlockSize: %d sectors\n", g_sb->blockSize);
+    printf ("DiskSize: %d blocks\n", g_sb->diskSize);
 
-    superblock->freeBlocksBitmapSize = buffer[9]*256 + buffer[8];
-    printf ("FreeBlocksBitmapSize: %d blocks\n", superblock->freeBlocksBitmapSize);
+    return OP_SUCCESS;
+}
 
-    superblock->freeInodeBitmapSize = buffer[11]*256 + buffer[10];
-    printf ("FreeInodeBitmapSize: %d blocks\n", superblock->freeInodeBitmapSize);
+/*-----------------------------------------------------------------------------
+Função: Realiza a leitura do inode referente ao diretório raiz
 
-    superblock->inodeAreaSize = buffer[13]*256 + buffer[12];
-    printf ("InodeAreaSize: %d blocks\n", superblock->inodeAreaSize);
+Saída:
+    Se a operação foi realizada com sucesso, retorna OP_SUCCESS
+    Se ocorreu algum erro, retorna OP_ERROR.
+-----------------------------------------------------------------------------*/
+int __read_rootInode()
+{
+    g_ri = __get_inode(0);
 
-    superblock->blockSize = buffer[15]*256 + buffer[14];
-    printf ("BlockSize: %d sectors\n", superblock->blockSize);
+    if( g_ri != NULL )
+    {
+        printf("Root dir. file size: %d blocks\n", g_ri->blocksFileSize);
+        printf("Root dir. file size: %d bytes\n", g_ri->blocksFileSize);
+        printf("Root dir. dataPtr[0]: %d\n", g_ri->dataPtr[0]);
+        printf("Root dir. dataPtr[1]: %d\n", g_ri->dataPtr[1]);
+        printf("Root dir. single ind. ptr.: %d\n", g_ri->singleIndPtr);
+        printf("Root dir. double ind. ptr.: %d\n", g_ri->doubleIndPtr);
 
-    superblock->diskSize = buffer[19]*16777216 + buffer[18]*65536 + buffer[17]*256 + buffer[16];
-    printf ("DiskSize: %d blocks\n", superblock->diskSize);
+        return OP_SUCCESS;
+    }
 
-    return 0;
+    return OP_ERROR;
+}
 
+/*-----------------------------------------------------------------------------
+Função: Inicializa as varíaveis necessárias para correta execução
+
+Saída:
+    Se a operação foi realizada com sucesso, retorna "0" (OP_SUCCESS)
+    Se ocorreu algum erro, retorna "-1" (OP_ERROR).
+-----------------------------------------------------------------------------*/
+int __initialize()
+{
+    int i;
+
+    if( __read_superblock() == 0 && __read_rootInode() == 0 )
+    {
+        for(i = 0; i < MAX_NUM_HANDLERS; i++)
+        {
+            g_files[i].record = NULL;
+            g_dirs[i].record = NULL;
+        }
+
+        g_cwd = "/";
+
+        g_initialized = 1;
+
+        return OP_SUCCESS;
+    }
+
+    return OP_ERROR;
 }
 
 /*-----------------------------------------------------------------------------
@@ -66,8 +213,12 @@ Entra:	name -> buffer onde colocar o string de identificação.
 Saída:	Se a operação foi realizada com sucesso, a função retorna "0" (zero).
 	Em caso de erro, será retornado um valor diferente de zero.
 -----------------------------------------------------------------------------*/
-int identify2 (char *name, int size);
+int identify2 (char *name, int size)
+{
+    sprintf(name, "Luís Augusto Weber Mercado - 265041\nMatheus Tavares Frigo - 262521\nNicholas de Aquino Lau - 268618\n");
 
+    return OP_SUCCESS;
+}
 
 /*-----------------------------------------------------------------------------
 Função: Criar um novo arquivo.
@@ -82,8 +233,68 @@ Entra:	filename -> nome do arquivo a ser criado.
 Saída:	Se a operação foi realizada com sucesso, a função retorna o handle do arquivo (número positivo).
 	Em caso de erro, deve ser retornado um valor negativo.
 -----------------------------------------------------------------------------*/
-FILE2 create2 (char *filename);
+FILE2 create2 (char *filename)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
 
+    }
+
+    int d_bitmap = 0, i_bitmap = 0;
+
+    // Gets a free bitmap entry
+    d_bitmap = searchBitmap2(BITMAP_DADOS, 0);
+
+    if( d_bitmap <= 0 )
+    {
+        printf("Error: can't find a free block!");
+
+        return OP_ERROR;
+    }
+
+    // TODO: Parse the filename
+
+    // Gets a free inode bitmap entry
+    i_bitmap = searchBitmap2(BITMAP_INODE, 0);
+
+    if( i_bitmap <= 0 )
+    {
+        printf("Error: can't find a free inode!");
+
+        return OP_ERROR;
+    }
+
+    // TODO: test filename existance
+
+    struct t2fs_inode *inode = (struct t2fs_inode*)malloc(sizeof(struct t2fs_inode));
+    inode->blocksFileSize = 1;
+    inode->bytesFileSize = 0;
+    inode->dataPtr[0] = d_bitmap;
+    inode->dataPtr[1] = INVALID_PTR;
+    inode->singleIndPtr = INVALID_PTR;
+    inode->doubleIndPtr = INVALID_PTR;
+
+    struct t2fs_record *record = (struct t2fs_record*)malloc(sizeof(struct t2fs_record));
+
+    strncpy(record->name, filename, FILENAME_SIZE - 1);
+    printf("%s\n", record->name);
+
+    record->TypeVal = TYPEVAL_REGULAR;
+    record->inodeNumber = i_bitmap;
+
+    // TODO: write file entrys
+
+    /*if( setBitmap2(d_bitmap, 1) == 0 && setBitmap2(i_bitmap, 1) == 0 )
+    {
+        return OP_SUCCESS;
+    }*/
+
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Apagar um arquivo do disco.
@@ -94,8 +305,33 @@ Entra:	filename -> nome do arquivo a ser apagado.
 Saída:	Se a operação foi realizada com sucesso, a função retorna "0" (zero).
 	Em caso de erro, será retornado um valor diferente de zero.
 -----------------------------------------------------------------------------*/
-int delete2 (char *filename);
+int delete2 (char *filename)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    return OP_ERROR;
+}
+
+int __get_free_file_handler()
+{
+    int i;
+
+    for(i = 0; i < MAX_NUM_HANDLERS; i++)
+    {
+        if( g_files[i].record != NULL )
+        {
+            return i;
+        }
+    }
+
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Abre um arquivo existente no disco.
@@ -111,8 +347,18 @@ Entra:	filename -> nome do arquivo a ser apagado.
 Saída:	Se a operação foi realizada com sucesso, a função retorna o handle do arquivo (número positivo)
 	Em caso de erro, deve ser retornado um valor negativo
 -----------------------------------------------------------------------------*/
-FILE2 open2 (char *filename);
+FILE2 open2 (char *filename)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Fecha o arquivo identificado pelo parâmetro "handle".
@@ -122,8 +368,18 @@ Entra:	handle -> identificador do arquivo a ser fechado
 Saída:	Se a operação foi realizada com sucesso, a função retorna "0" (zero).
 	Em caso de erro, será retornado um valor diferente de zero.
 -----------------------------------------------------------------------------*/
-int close2 (FILE2 handle);
+int close2 (FILE2 handle)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Realiza a leitura de "size" bytes do arquivo identificado por "handle".
@@ -138,8 +394,18 @@ Saída:	Se a operação foi realizada com sucesso, a função retorna o número 
 	Se o valor retornado for menor do que "size", então o contador de posição atingiu o final do arquivo.
 	Em caso de erro, será retornado um valor negativo.
 -----------------------------------------------------------------------------*/
-int read2 (FILE2 handle, char *buffer, int size);
+int read2 (FILE2 handle, char *buffer, int size)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Realiza a escrita de "size" bytes no arquivo identificado por "handle".
@@ -153,8 +419,18 @@ Entra:	handle -> identificador do arquivo a ser escrito
 Saída:	Se a operação foi realizada com sucesso, a função retorna o número de bytes efetivamente escritos.
 	Em caso de erro, será retornado um valor negativo.
 -----------------------------------------------------------------------------*/
-int write2 (FILE2 handle, char *buffer, int size);
+int write2 (FILE2 handle, char *buffer, int size)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Função usada para truncar um arquivo.
@@ -167,8 +443,18 @@ Entra:	handle -> identificador do arquivo a ser truncado
 Saída:	Se a operação foi realizada com sucesso, a função retorna "0" (zero).
 	Em caso de erro, será retornado um valor diferente de zero.
 -----------------------------------------------------------------------------*/
-int truncate2 (FILE2 handle);
+int truncate2 (FILE2 handle)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Reposiciona o contador de posições (current pointer) do arquivo identificado por "handle".
@@ -183,8 +469,18 @@ Entra:	handle -> identificador do arquivo a ser escrito
 Saída:	Se a operação foi realizada com sucesso, a função retorna "0" (zero).
 	Em caso de erro, será retornado um valor diferente de zero.
 -----------------------------------------------------------------------------*/
-int seek2 (FILE2 handle, DWORD offset);
+int seek2 (FILE2 handle, DWORD offset)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Criar um novo diretório.
@@ -198,8 +494,18 @@ Entra:	pathname -> caminho do diretório a ser criado
 Saída:	Se a operação foi realizada com sucesso, a função retorna "0" (zero).
 	Em caso de erro, será retornado um valor diferente de zero.
 -----------------------------------------------------------------------------*/
-int mkdir2 (char *pathname);
+int mkdir2 (char *pathname)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Apagar um subdiretório do disco.
@@ -216,8 +522,18 @@ Entra:	pathname -> caminho do diretório a ser criado
 Saída:	Se a operação foi realizada com sucesso, a função retorna "0" (zero).
 	Em caso de erro, será retornado um valor diferente de zero.
 -----------------------------------------------------------------------------*/
-int rmdir2 (char *pathname);
+int rmdir2 (char *pathname)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Altera o diretório atual de trabalho (working directory).
@@ -231,8 +547,22 @@ Entra:	pathname -> caminho do novo diretório de trabalho.
 Saída:	Se a operação foi realizada com sucesso, a função retorna "0" (zero).
 		Em caso de erro, será retornado um valor diferente de zero.
 -----------------------------------------------------------------------------*/
-int chdir2 (char *pathname);
+int chdir2 (char *pathname)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    g_cwd = pathname;
+
+    printf("%s\n", g_cwd);
+
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Informa o diretório atual de trabalho.
@@ -248,8 +578,33 @@ Entra:	pathname -> buffer para onde copiar o pathname do diretório de trabalho
 Saída:	Se a operação foi realizada com sucesso, a função retorna "0" (zero).
 		Em caso de erro, será retornado um valor diferente de zero.
 -----------------------------------------------------------------------------*/
-int getcwd2 (char *pathname, int size);
+int getcwd2 (char *pathname, int size)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    return OP_ERROR;
+}
+
+int __get_free_dir_handler()
+{
+    int i;
+
+    for(i = 0; i < MAX_NUM_HANDLERS; i++)
+    {
+        if( g_dirs[i].record != NULL )
+        {
+            return i;
+        }
+    }
+
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Abre um diretório existente no disco.
@@ -264,8 +619,25 @@ Entra:	pathname -> caminho do diretório a ser aberto
 Saída:	Se a operação foi realizada com sucesso, a função retorna o identificador do diretório (handle).
 	Em caso de erro, será retornado um valor negativo.
 -----------------------------------------------------------------------------*/
-DIR2 opendir2 (char *pathname);
+DIR2 opendir2 (char *pathname)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    DIR2 freeHandler = __get_free_dir_handler();
+
+    if( freeHandler != OP_ERROR )
+    {
+
+    }
+
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Realiza a leitura das entradas do diretório identificado por "handle".
@@ -282,8 +654,18 @@ Entra:	handle -> identificador do diretório cujas entradas deseja-se ler.
 Saída:	Se a operação foi realizada com sucesso, a função retorna "0" (zero).
 	Em caso de erro, será retornado um valor diferente de zero ( e "dentry" não será válido)
 -----------------------------------------------------------------------------*/
-int readdir2 (DIR2 handle, DIRENT2 *dentry);
+int readdir2 (DIR2 handle, DIRENT2 *dentry)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
 
+    return OP_ERROR;
+}
 
 /*-----------------------------------------------------------------------------
 Função:	Fecha o diretório identificado pelo parâmetro "handle".
@@ -293,4 +675,15 @@ Entra:	handle -> identificador do diretório que se deseja fechar (encerrar a op
 Saída:	Se a operação foi realizada com sucesso, a função retorna "0" (zero).
 	Em caso de erro, será retornado um valor diferente de zero.
 -----------------------------------------------------------------------------*/
-int closedir2 (DIR2 handle);
+int closedir2 (DIR2 handle)
+{
+    if( !g_initialized )
+    {
+        if( __initialize() != 0 )
+        {
+            return OP_ERROR;
+        }
+    }
+
+    return OP_ERROR;
+}

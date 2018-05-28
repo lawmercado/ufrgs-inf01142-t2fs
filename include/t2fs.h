@@ -55,6 +55,20 @@ typedef struct {
     DWORD   fileSize;                   /* Numero de bytes do arquivo                          */
 } DIRENT2;
 
+/** Handler de arquivo */
+typedef struct {
+    struct t2fs_record *record;
+	int current_pointer;
+
+} FILE_HANDLER;
+
+/** Handler de diretório */
+typedef struct {
+    struct t2fs_record *record;
+	int current_entry;
+
+} DIR_HANDLER;
+
 #pragma pack(pop)
 
 
