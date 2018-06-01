@@ -2,6 +2,7 @@
 #define __LIBT2FS___
 
 #define	SECTOR_SIZE	256
+#define RECORD_NAME_SIZE 59
 
 #define TYPEVAL_INVALIDO    0x00
 #define TYPEVAL_REGULAR     0x01
@@ -33,7 +34,7 @@ struct t2fs_superbloco {
 /** Registro de diretório (entrada de diretório) */
 struct t2fs_record {
 	BYTE    TypeVal;        /* Tipo da entrada. Indica se o registro é inválido (TYPEVAL_INVALIDO), arquivo (TYPEVAL_REGULAR) ou diretório (TYPEVAL_DIRETORIO) */
-	char    name[59];       /* Nome do arquivo. : string com caracteres ASCII (0x21 até 0x7A), case sensitive. */
+	char    name[RECORD_NAME_SIZE];       /* Nome do arquivo. : string com caracteres ASCII (0x21 até 0x7A), case sensitive. */
 	DWORD   inodeNumber;    /* Número do i-node (se inválido, recebe INVALID_PTR)  */
 };
 
@@ -55,19 +56,13 @@ typedef struct {
     DWORD   fileSize;                   /* Numero de bytes do arquivo                          */
 } DIRENT2;
 
-/** Handler de arquivo */
+/** Handler */
 typedef struct {
     struct t2fs_record *record;
-	int current_pointer;
+	int pointer;
+    int free;
 
-} FILE_HANDLER;
-
-/** Handler de diretório */
-typedef struct {
-    struct t2fs_record *record;
-	int current_entry;
-
-} DIR_HANDLER;
+} HANDLER;
 
 #pragma pack(pop)
 

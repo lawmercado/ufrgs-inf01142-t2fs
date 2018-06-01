@@ -11,7 +11,5 @@ int main()
 
     int handle = opendir2("/");
 
-    chdir2("/oie/ls/");
-
     return 0;
 }
