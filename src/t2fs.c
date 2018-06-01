@@ -678,32 +678,34 @@ int seek2 (FILE2 handle, DWORD offset)
     return OP_ERROR;
 }
 
-char* __get_abspath(char *pathname)
+char* __get_abspathname(char *pathname)
 {
-    char *cpathname, *abspathname;
+    char *auxPathname, *absPathname;
     int i;
 
-    abspathname = (char*)malloc(sizeof(char) * (strlen(pathname) + strlen(g_cwd)));
-    cpathname = strdup(pathname);
+    auxPathname = strdup(pathname);
+
+    absPathname = (char*)malloc(sizeof(char) * (strlen(pathname) + strlen(g_cwd)));
+    strcpy(absPathname, "");
 
     if( strlen(pathname) > 0 )
     {
         if( pathname[0] == '/' )
         {
-            abspathname = cpathname;
+            absPathname = auxPathname;
         }
         else
         {
-            strcpy(abspathname, g_cwd);
-            strcat(abspathname, cpathname);
+            strcpy(absPathname, g_cwd);
+            strcat(absPathname, auxPathname);
         }
 
-        if( abspathname[strlen(abspathname) - 2] != '/' )
+        if( absPathname[strlen(absPathname) - 2] != '/' )
         {
-            strcat(abspathname, "/");
+            strcat(absPathname, "/");
         }
 
-        return abspathname;
+        return absPathname;
     }
 
     return NULL;
@@ -711,19 +713,19 @@ char* __get_abspath(char *pathname)
 
 struct t2fs_record* __navigate(char *pathname)
 {
-    char *abspathname, *cpathname;
+    char *absPathname, *auxPathname;
     struct t2fs_record *record = NULL;
     struct t2fs_inode *inode = NULL;
 
-    cpathname = strdup(pathname);
-    abspathname = __get_abspath(pathname);
+    auxPathname = strdup(pathname);
+    absPathname = __get_abspathname(pathname);
 
-    printf("DEBUG: ABS PATH %s\n", abspathname);
+    printf("DEBUG: ABS PATH %s\n", absPathname);
 
-    if( abspathname != NULL )
+    if( absPathname != NULL )
     {
         // Caminho absoluto
-        if( cpathname[0] == '/' )
+        if( auxPathname[0] == '/' )
         {
             record = __get_record_by_name(".", g_ri->dataPtr[0]);
             inode = g_ri;
@@ -736,7 +738,7 @@ struct t2fs_record* __navigate(char *pathname)
 
         char *token;
 
-        while( token = strsep(&cpathname, "/") )
+        while( token = strsep(&auxPathname, "/") )
         {
             if( strlen(token) > 0 )
             {
@@ -838,7 +840,7 @@ int chdir2 (char *pathname)
 
     if( record != NULL )
     {
-        g_cwd = __get_abspath(pathname);
+        g_cwd = __get_abspathname(pathname);
         g_cwd_record = record;
 
         return OP_SUCCESS;

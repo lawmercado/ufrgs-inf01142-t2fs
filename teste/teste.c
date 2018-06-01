@@ -25,7 +25,7 @@ int main()
     getcwd2(cwd, 200);
     printf("CWD PÓS chdir2 %s\n", cwd);
 
-    int handle = opendir2("dir1/dir12/..");
+    int handle = opendir2("/dir1/dir12/../..");
 
     if( handle != -1 )
     {
