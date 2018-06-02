@@ -1,30 +1,5 @@
-#ifndef __CONVERTER___
-#define __CONVERTER___
-
-/*-----------------------------------------------------------------------------
-Função: Dado um buffer, lê um valor inteiro do mesmo (expresso em Little Endian)
-
-Entra:
-    buffer -> buffer com os valores
-    start -> índice onde começa o valor no buffer
-	size -> tamanho do valor a ser lido
-
-Saída:
-    O valor presente no buffer.
------------------------------------------------------------------------------*/
-int __get_value_from_buffer(unsigned char *buffer, int start, int size);
-
-/*-----------------------------------------------------------------------------
-Função: Converte um valor inteiro para um buffer com os bytes (como Little Endian)
-
-Entra:
-    value -> valor a ser convertido
-    size -> tamanho do buffer desejado
-
-Saída:
-    Buffer expressando o valor.
------------------------------------------------------------------------------*/
-unsigned char* __convert_value_to_buffer(unsigned int value, int size);
+#ifndef __PARSER___
+#define __PARSER___
 
 /*-----------------------------------------------------------------------------
 Função: Cria um 't2fs_superbloco' a partir do buffer
@@ -83,5 +58,18 @@ Saída:
     O buffer representando a estrutura.
 -----------------------------------------------------------------------------*/
 unsigned char* record_to_buffer(struct t2fs_record *record);
+
+/*-----------------------------------------------------------------------------
+Função: Gera o caminho absoluto, removendo os links entre diretórios
+
+Entra:
+    path -> caminho a ser processado
+    cwdPath -> caminho corrente
+
+Saída:
+    Se a operação foi realizada corretamente, o caminho absoluto direto
+    Se houver algum erro, NULL.
+-----------------------------------------------------------------------------*/
+char* parse_path(char *path, char *cwdp);
 
 #endif

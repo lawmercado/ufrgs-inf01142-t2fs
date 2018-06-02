@@ -11,21 +11,7 @@ void print_dentry(char* label, DIRENT2 *dentry)
 
 int main()
 {
-    char name[200];
-    identify2(name, 200);
-    printf("%s\n", name);
-
-    char cwd[200];
-    getcwd2(cwd, 200);
-
-    printf("CWD %s\n", cwd);
-
-    //chdir2("dir1/dir12/..");
-
-    getcwd2(cwd, 200);
-    printf("CWD PÓS chdir2 %s\n", cwd);
-
-    int handle = opendir2("/dir1/dir12/../..");
+    int handle = opendir2(".");
 
     if( handle != -1 )
     {

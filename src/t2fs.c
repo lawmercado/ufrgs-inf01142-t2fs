@@ -1,7 +1,7 @@
 #include "../include/t2fs.h"
 #include "../include/bitmap2.h"
 #include "../include/apidisk.h"
-#include "../include/converter.h"
+#include "../include/parser.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -678,39 +678,6 @@ int seek2 (FILE2 handle, DWORD offset)
     return OP_ERROR;
 }
 
-char* __get_abspathname(char *pathname)
-{
-    char *auxPathname, *absPathname;
-    int i;
-
-    auxPathname = strdup(pathname);
-
-    absPathname = (char*)malloc(sizeof(char) * (strlen(pathname) + strlen(g_cwd)));
-    strcpy(absPathname, "");
-
-    if( strlen(pathname) > 0 )
-    {
-        if( pathname[0] == '/' )
-        {
-            absPathname = auxPathname;
-        }
-        else
-        {
-            strcpy(absPathname, g_cwd);
-            strcat(absPathname, auxPathname);
-        }
-
-        if( absPathname[strlen(absPathname) - 2] != '/' )
-        {
-            strcat(absPathname, "/");
-        }
-
-        return absPathname;
-    }
-
-    return NULL;
-}
-
 struct t2fs_record* __navigate(char *pathname)
 {
     char *absPathname, *auxPathname;
@@ -718,7 +685,7 @@ struct t2fs_record* __navigate(char *pathname)
     struct t2fs_inode *inode = NULL;
 
     auxPathname = strdup(pathname);
-    absPathname = __get_abspathname(pathname);
+    absPathname = parse_path(pathname, g_cwd);
 
     printf("DEBUG: ABS PATH %s\n", absPathname);
 
@@ -836,14 +803,19 @@ int chdir2 (char *pathname)
         }
     }
 
-    struct t2fs_record *record = __navigate(pathname);
+    char* path = parse_path(pathname, g_cwd);
+
+    struct t2fs_record *record = __navigate(path);
 
     if( record != NULL )
     {
-        g_cwd = __get_abspathname(pathname);
-        g_cwd_record = record;
+        if( record->TypeVal == TYPEVAL_DIRETORIO )
+        {
+            g_cwd = path;
+            g_cwd_record = record;
 
-        return OP_SUCCESS;
+            return OP_SUCCESS;
+        }
     }
 
     return OP_ERROR;
