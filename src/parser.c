@@ -219,11 +219,9 @@ Saída:
     Se a operação foi realizada corretamente, o caminho absoluto
     Se houver algum erro, NULL.
 -----------------------------------------------------------------------------*/
-
 char* __get_abspath(char *path, char *cwdPath)
 {
     char *auxPathname, *absPathname;
-    int i;
 
     auxPathname = strdup(path);
 
@@ -234,10 +232,11 @@ char* __get_abspath(char *path, char *cwdPath)
     {
         if( path[0] == '/' )
         {
+            free(absPathname);
             absPathname = auxPathname;
 
             // Caso seja o dir. raiz
-            if(strlen(path) == 1)
+            if( strlen(path) == 1 )
             {
                 return absPathname;
             }
@@ -264,6 +263,153 @@ char* __get_abspath(char *path, char *cwdPath)
 }
 
 /*-----------------------------------------------------------------------------
+Função: Conta o número de records num dado path
+
+Entra:
+    absPathname -> caminho absoluto ser processado
+
+Saída:
+    Contagem dos diretórios.
+-----------------------------------------------------------------------------*/
+int __count_records(char *absPathname)
+{
+    int numRecords = 0;
+    int i;
+
+    for( i = 0; i < strlen(absPathname); i++ )
+    {
+        if( absPathname[i] == '/' )
+        {
+            numRecords++;
+        }
+    }
+
+    return numRecords;
+}
+
+/*-----------------------------------------------------------------------------
+Função: A partir do caminho absoluto, cria um vetor dos nomes dos records
+
+Entra:
+    absPathname -> caminho absoluto ser processado
+
+Saída:
+    Vetor de nomes dos records.
+-----------------------------------------------------------------------------*/
+char** __get_path_array(char *absPathname)
+{
+    char **records = NULL;
+    char *currSlash = absPathname, *nextSlash = NULL;
+    int numRecords = __count_records(absPathname);
+    int i, length;
+
+    records = (char**)calloc(numRecords, sizeof(char*));
+
+    for( i = 0; i < numRecords; i++ )
+    {
+        records[i] = (char *)calloc(RECORD_NAME_SIZE, sizeof(char));
+        strcpy(records[i], "");
+    }
+
+    for( i = 0; i < numRecords && currSlash != NULL; i++ )
+    {
+        nextSlash = strstr(strstr(currSlash, "/") + 1, "/");
+
+        if( nextSlash != NULL )
+        {
+            length = (nextSlash - currSlash) - 1;
+        }
+        else
+        {
+            length = ((absPathname + strlen(absPathname)) - currSlash) - 1;
+        }
+
+        strncpy(records[i], currSlash + 1, length);
+        records[i][length] = '\0';
+
+        currSlash = nextSlash;
+    }
+
+    return records;
+}
+
+/*-----------------------------------------------------------------------------
+Função: Simplifica o dado caminho absoluto, retirando os links
+
+Entra:
+    absPathname -> caminho absoluto ser processado
+
+Saída:
+    Caminho simplificado.
+-----------------------------------------------------------------------------*/
+char* __get_simplified_path(char *absPathname)
+{
+    char **records;
+    char *parsedPathname, *auxRecord;
+    int i, numRecords, alocatedRecords, idxRelative, hasRelative;
+
+    records = __get_path_array(absPathname);
+    numRecords = __count_records(absPathname);
+    alocatedRecords = numRecords;
+
+    parsedPathname = (char*)calloc(strlen(absPathname), sizeof(char));
+    strcpy(parsedPathname, "/");
+
+    do
+    {
+        hasRelative = 0;
+
+        for( i = 0; i < numRecords && hasRelative == 0; i++ )
+        {
+            if( strcmp(records[i], "..") == 0 )
+            {
+                idxRelative = i;
+                hasRelative = 1;
+            }
+        }
+
+        auxRecord = (char*)calloc(RECORD_NAME_SIZE, sizeof(char));
+
+        if( hasRelative )
+        {
+            for( i = idxRelative; i < (numRecords - 1); i++ )
+            {
+                strcpy(auxRecord, records[i+1]);
+                strcpy(records[i+1], records[i]);
+                strcpy(records[i-1], auxRecord);
+            }
+
+            numRecords -= 2;
+        }
+
+    } while( hasRelative );
+
+    // Monta o caminho simplificando
+    for( i = 0; i < numRecords; i++ )
+    {
+        if( strcmp(records[i], ".") != 0 )
+        {
+            strcat(parsedPathname, records[i]);
+
+            if( i < (numRecords - 1) )
+            {
+                strcat(parsedPathname, "/");
+            }
+        }
+    }
+
+    for( i = 0; i < alocatedRecords; i++ )
+    {
+        free(records[i]);
+    }
+
+    free(records);
+    free(auxRecord);
+
+    return parsedPathname;
+}
+
+/*-----------------------------------------------------------------------------
 Função: Gera o caminho absoluto, removendo os links entre diretórios
 
 Entra:
@@ -276,14 +422,9 @@ Saída:
 -----------------------------------------------------------------------------*/
 char* parse_path(char *path, char* cwdPath)
 {
-    char *absPathname = __get_abspath(path, cwdPath);
-    char *parsedPathname;
-    char **records;
-    int numRecords = 0;
-    int i;
+    char *absPathname, *parsedPathname;
 
-    parsedPathname = (char*)malloc(sizeof(char) * strlen(absPathname));
-    strcpy(parsedPathname, "/");
+    absPathname = __get_abspath(path, cwdPath);
 
     if( absPathname != NULL )
     {
@@ -293,87 +434,9 @@ char* parse_path(char *path, char* cwdPath)
             return absPathname;
         }
 
-        for( i = 0; i < strlen(absPathname); i++ )
-        {
-            if( absPathname[i] == '/' )
-            {
-                numRecords++;
-            }
-        }
+        parsedPathname =  __get_simplified_path(absPathname);
 
-        records = (char**)malloc(sizeof(char*) * numRecords);
-
-        for( i = 0; i < numRecords; i++ )
-        {
-            records[i] = (char *)malloc(sizeof(char) * RECORD_NAME_SIZE);
-            strcpy(records[i], "");
-        }
-
-        char *currSlash = absPathname;
-        char *nextSlash;
-        int length = 0;
-
-        for( i = 0; i < numRecords && currSlash != NULL; i++ )
-        {
-            nextSlash = strstr(strstr(currSlash, "/") + 1, "/");
-
-            if( nextSlash != NULL )
-            {
-                length = (nextSlash - currSlash) - 1;
-            }
-            else
-            {
-                length = ((absPathname + strlen(absPathname)) - currSlash) - 1;
-            }
-
-            strncpy(records[i], currSlash + 1, length);
-            records[i][length] = '\0';
-
-            currSlash = nextSlash;
-        }
-
-        int hasRelative = 0;
-        int idxRelative;
-
-        do
-        {
-            hasRelative = 0;
-
-            for( i = 0; i < numRecords && hasRelative == 0; i++ )
-            {
-                if(strcmp(records[i], "..") == 0)
-                {
-                    idxRelative = i;
-                    hasRelative = 1;
-                }
-            }
-
-            if(hasRelative)
-            {
-                for( i = idxRelative; i < (numRecords - 1); i++ )
-                {
-                    char* auxRecord = strdup(records[i+1]);
-                    records[i+1] = strdup(records[i]);
-                    records[i-1] = auxRecord;
-                }
-
-                numRecords -= 2;
-            }
-
-        } while(hasRelative);
-
-        for( i = 0; i < numRecords; i++ )
-        {
-            if( strcmp(records[i], ".") != 0 )
-            {
-                strcat(parsedPathname, records[i]);
-
-                if( i < (numRecords - 1) )
-                {
-                    strcat(parsedPathname, "/");
-                }
-            }
-        }
+        free(absPathname);
 
         return parsedPathname;
     }

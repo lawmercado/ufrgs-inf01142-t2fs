@@ -11,7 +11,7 @@ void print_dentry(char* label, DIRENT2 *dentry)
 
 int main()
 {
-    int handle = opendir2(".");
+    int handle = opendir2("./../dir1/../dir1/dir12/");
 
     if( handle != -1 )
     {

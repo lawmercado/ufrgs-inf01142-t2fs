@@ -390,7 +390,6 @@ Saída:
 -----------------------------------------------------------------------------*/
 int __read_superblock()
 {
-    int i;
     unsigned char buffer[SECTOR_SIZE];
     unsigned int sector_superblock = 0;
 
@@ -705,7 +704,7 @@ struct t2fs_record* __navigate(char *pathname)
 
         char *token;
 
-        while( token = strsep(&auxPathname, "/") )
+        while( (token = strsep(&auxPathname, "/")) )
         {
             if( strlen(token) > 0 )
             {
