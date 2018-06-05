@@ -72,4 +72,6 @@ Saída:
 -----------------------------------------------------------------------------*/
 char* parse_path(char *path, char *cwdp);
 
+char* extract_recordname(char* parsedPath);
+
 #endif

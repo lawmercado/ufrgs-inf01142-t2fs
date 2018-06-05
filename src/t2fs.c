@@ -438,7 +438,12 @@ int __initialize()
         for(i = 0; i < MAX_NUM_HANDLERS; i++)
         {
             g_files[i].free = 1;
+            g_files[i].record = NULL;
+            g_files[i].wd = NULL;
+
             g_dirs[i].free = 1;
+            g_dirs[i].record = NULL;
+            g_dirs[i].wd = NULL;
         }
 
         g_cwd = "/";
@@ -677,19 +682,19 @@ int seek2 (FILE2 handle, DWORD offset)
     return OP_ERROR;
 }
 
-struct t2fs_record* __navigate(char *pathname)
+struct t2fs_record* __navigate(char *parsedPath)
 {
-    char *absPathname, *auxPathname;
+    char *auxPathname;
     struct t2fs_record *record = NULL;
     struct t2fs_inode *inode = NULL;
 
-    auxPathname = strdup(pathname);
-    absPathname = parse_path(pathname, g_cwd);
-
-    printf("DEBUG: ABS PATH %s\n", absPathname);
-
-    if( absPathname != NULL )
+    if( parsedPath != NULL )
     {
+        auxPathname = (char*)calloc(strlen(parsedPath) + 1, sizeof(char));
+        strcpy(auxPathname, parsedPath);
+
+        printf("DEBUG: ABS PATH %s\n", parsedPath);
+
         // Caminho absoluto
         if( auxPathname[0] == '/' )
         {
@@ -802,18 +807,21 @@ int chdir2 (char *pathname)
         }
     }
 
-    char* path = parse_path(pathname, g_cwd);
+    char* parsedPath = parse_path(pathname, g_cwd);
 
-    struct t2fs_record *record = __navigate(path);
-
-    if( record != NULL )
+    if( parsedPath != NULL )
     {
-        if( record->TypeVal == TYPEVAL_DIRETORIO )
-        {
-            g_cwd = path;
-            g_cwd_record = record;
+        struct t2fs_record *record = __navigate(parsedPath);
 
-            return OP_SUCCESS;
+        if( record != NULL )
+        {
+            if( record->TypeVal == TYPEVAL_DIRETORIO )
+            {
+                g_cwd = parsedPath;
+                g_cwd_record = record;
+
+                return OP_SUCCESS;
+            }
         }
     }
 
@@ -879,24 +887,20 @@ DIR2 opendir2 (char *pathname)
         }
     }
 
-    struct t2fs_record *record;
+    char* parsedPath = parse_path(pathname, g_cwd);
 
-    if ( strlen(pathname) > 0 )
+    if( parsedPath != NULL )
     {
+        struct t2fs_record *record = __navigate(parsedPath);
         DIR2 freeHandler = __get_free_dir_handler();
 
-        if( freeHandler != OP_ERROR )
+        if( freeHandler != OP_ERROR && record != NULL )
         {
-            record = __navigate(pathname);
+            g_dirs[freeHandler].record = record;
+            g_dirs[freeHandler].pointer = 0;
+            g_dirs[freeHandler].free = 0;
 
-            if( record != NULL )
-            {
-                g_dirs[freeHandler].record = record;
-                g_dirs[freeHandler].pointer = 0;
-                g_dirs[freeHandler].free = 0;
-
-                return freeHandler;
-            }
+            return freeHandler;
         }
     }
 

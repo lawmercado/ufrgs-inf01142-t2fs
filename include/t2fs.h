@@ -58,9 +58,10 @@ typedef struct {
 
 /** Handler */
 typedef struct {
-    struct t2fs_record *record;
-	int pointer;
-    int free;
+    struct t2fs_record *record; /* Record associado ao handler */
+	int pointer;                /* Ponteiro do registro corrente (dir: entry, arq: byte)*/
+    char *wd;                   /* Caminho associado do record */
+    int free;                   /* Flag indicando se o handler está livre */
 
 } HANDLER;
 

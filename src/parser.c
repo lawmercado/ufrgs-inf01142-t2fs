@@ -352,8 +352,9 @@ char* __get_simplified_path(char *absPathname)
     numRecords = __count_records(absPathname);
     alocatedRecords = numRecords;
 
-    parsedPathname = (char*)calloc(strlen(absPathname), sizeof(char));
+    parsedPathname = (char*)calloc(strlen(absPathname) + 1, sizeof(char));
     strcpy(parsedPathname, "/");
+    auxRecord = (char*)calloc(RECORD_NAME_SIZE, sizeof(char));
 
     do
     {
@@ -367,8 +368,6 @@ char* __get_simplified_path(char *absPathname)
                 hasRelative = 1;
             }
         }
-
-        auxRecord = (char*)calloc(RECORD_NAME_SIZE, sizeof(char));
 
         if( hasRelative )
         {
@@ -396,6 +395,11 @@ char* __get_simplified_path(char *absPathname)
                 strcat(parsedPathname, "/");
             }
         }
+    }
+
+    if( strlen(parsedPathname) > 1 && parsedPathname[strlen(parsedPathname) - 1] == '/' )
+    {
+        parsedPathname[strlen(parsedPathname) - 1] = '\0';
     }
 
     for( i = 0; i < alocatedRecords; i++ )
@@ -431,7 +435,9 @@ char* parse_path(char *path, char* cwdPath)
         // Caso for o dir. raiz
         if( (strlen(absPathname) == 1) && (absPathname[0] == '/') )
         {
-            return absPathname;
+            free(absPathname);
+
+            return "/";
         }
 
         parsedPathname =  __get_simplified_path(absPathname);
