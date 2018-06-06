@@ -38,6 +38,18 @@ Saída:
 struct t2fs_record* buffer_to_record(unsigned char *buffer, int start);
 
 /*-----------------------------------------------------------------------------
+Função: Cria um valor DWORD a partir de um buffer
+
+Entra:
+    buffer -> buffer com o dado
+    start -> começo do dado no buffer
+
+Saída:
+    O valor gerado.
+-----------------------------------------------------------------------------*/
+DWORD buffer_to_dword(unsigned char *buffer, int start);
+
+/*-----------------------------------------------------------------------------
 Função: Cria um buffer a partir de um 't2fs_inode'
 
 Entra:
@@ -72,6 +84,15 @@ Saída:
 -----------------------------------------------------------------------------*/
 char* parse_path(char *path, char *cwdp);
 
+/*-----------------------------------------------------------------------------
+Função: Extrai o nome do 'record', de trás para frente, modificando o caminho informado
+
+Entra:
+    parsedPath -> Caminho já normalizado
+
+Saída:
+    Nome do 'record'.
+-----------------------------------------------------------------------------*/
 char* extract_recordname(char* parsedPath);
 
 #endif

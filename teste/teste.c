@@ -17,7 +17,7 @@ int main()
     //int handle = opendir2("/dir1/");
     //int handle = opendir2("/dir1");
     //int handle = opendir2("/dir1/../dir1/dir12");
-    int handle = opendir2("/dir1/../dir1/dir12/");
+    int handle = opendir2("/");
 
     if( handle != -1 )
     {
@@ -28,6 +28,8 @@ int main()
             print_dentry("Entrada do diretório", &dentry);
         }
     }
+
+    closedir2(handle);
 
     return 0;
 }

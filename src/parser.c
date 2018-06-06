@@ -147,6 +147,21 @@ struct t2fs_record* buffer_to_record(unsigned char *buffer, int start)
 }
 
 /*-----------------------------------------------------------------------------
+Função: Cria um valor DWORD a partir de um buffer
+
+Entra:
+    buffer -> buffer com o dado
+    start -> começo do dado no buffer
+
+Saída:
+    O valor gerado.
+-----------------------------------------------------------------------------*/
+DWORD buffer_to_dword(unsigned char *buffer, int start)
+{
+    return __get_value_from_buffer(buffer, start, 4);
+}
+
+/*-----------------------------------------------------------------------------
 Função: Cria um buffer a partir de um 't2fs_inode'
 
 Entra:
@@ -448,4 +463,43 @@ char* parse_path(char *path, char* cwdPath)
     }
 
     return NULL;
+}
+
+/*-----------------------------------------------------------------------------
+Função: Extrai o nome do 'record', de trás para frente, modificando o caminho informado
+
+Entra:
+    parsedPath -> Caminho já normalizado
+
+Saída:
+    Nome do 'record'.
+-----------------------------------------------------------------------------*/
+char* extract_recordname(char* parsedPath)
+{
+    int i;
+    char* recordName;
+
+    recordName = (char*)calloc(RECORD_NAME_SIZE, sizeof(char));
+    strcpy(recordName, "");
+
+    if( strlen(parsedPath) > 1 )
+    {
+        for(i = (strlen(parsedPath) - 1); i >= 0; i-- )
+        {
+            if( parsedPath[i] == '/' )
+            {
+                strcpy(recordName, parsedPath + (i+1));
+                strcpy(parsedPath + i, "");
+
+                break;
+            }
+        }
+
+        if( strlen(parsedPath) == 0 )
+        {
+            strcpy(parsedPath, "/");
+        }
+    }
+
+    return recordName;
 }
