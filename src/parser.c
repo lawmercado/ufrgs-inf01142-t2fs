@@ -14,7 +14,7 @@ Entra:
 Saída:
     O valor presente no buffer.
 -----------------------------------------------------------------------------*/
-int __get_value_from_buffer(unsigned char *buffer, int start, int size)
+int __get_value_from_buffer(BYTE *buffer, int start, int size)
 {
     int i = 0;
     unsigned int value = 0;
@@ -37,9 +37,9 @@ Entra:
 Saída:
     Buffer expressando o valor.
 -----------------------------------------------------------------------------*/
-unsigned char* __convert_value_to_buffer(unsigned int value, int size)
+BYTE* __convert_value_to_buffer(unsigned int value, int size)
 {
-    unsigned char *buffer = (unsigned char*)malloc(sizeof(unsigned char) * (size + 1));
+    BYTE *buffer = (BYTE*)malloc(sizeof(BYTE) * (size + 1));
 
     if( size > 2 )
     {
@@ -68,7 +68,7 @@ Entra:
 Saída:
     A struct criada a partir dos dados.
 -----------------------------------------------------------------------------*/
-struct t2fs_superbloco* buffer_to_superblock(unsigned char *buffer, int start)
+struct t2fs_superbloco* buffer_to_superblock(BYTE *buffer, int start)
 {
     struct t2fs_superbloco *sb = NULL;
     int i = 0;
@@ -101,7 +101,7 @@ Entra:
 Saída:
     A struct criada a partir dos dados.
 -----------------------------------------------------------------------------*/
-struct t2fs_inode* buffer_to_inode(unsigned char *buffer, int start)
+struct t2fs_inode* buffer_to_inode(BYTE *buffer, int start)
 {
     struct t2fs_inode *inode = NULL;
     inode = (struct t2fs_inode*)malloc(sizeof(struct t2fs_inode));
@@ -126,7 +126,7 @@ Entra:
 Saída:
     A struct criada a partir dos dados.
 -----------------------------------------------------------------------------*/
-struct t2fs_record* buffer_to_record(unsigned char *buffer, int start)
+struct t2fs_record* buffer_to_record(BYTE *buffer, int start)
 {
     struct t2fs_record *record = NULL;
     int i;
@@ -156,7 +156,7 @@ Entra:
 Saída:
     O valor gerado.
 -----------------------------------------------------------------------------*/
-DWORD buffer_to_dword(unsigned char *buffer, int start)
+DWORD buffer_to_dword(BYTE *buffer, int start)
 {
     return __get_value_from_buffer(buffer, start, 4);
 }
@@ -170,13 +170,12 @@ Entra:
 Saída:
     O buffer representando a estrutura.
 -----------------------------------------------------------------------------*/
-unsigned char* inode_to_buffer(struct t2fs_inode *inode)
+BYTE* inode_to_buffer(struct t2fs_inode *inode)
 {
-    unsigned char *buffer = NULL;
+    BYTE *buffer = NULL;
     int i;
-    int length = sizeof(struct t2fs_inode);
 
-    buffer = (unsigned char*)malloc(length);
+    buffer = (BYTE*)calloc(sizeof(struct t2fs_inode), sizeof(BYTE));
 
     for( i = 0; i < 4; i++ )
     {
@@ -200,13 +199,12 @@ Entra:
 Saída:
     O buffer representando a estrutura.
 -----------------------------------------------------------------------------*/
-unsigned char* record_to_buffer(struct t2fs_record *record)
+BYTE* record_to_buffer(struct t2fs_record *record)
 {
-    unsigned char *buffer = NULL;
+    BYTE *buffer = NULL;
     int i;
-    int length = sizeof(struct t2fs_record);
 
-    buffer = (unsigned char*)malloc(length);
+    buffer = (BYTE*)calloc(sizeof(struct t2fs_record), sizeof(BYTE));
 
     buffer[0] = __convert_value_to_buffer(record->TypeVal, 4)[0];
 
