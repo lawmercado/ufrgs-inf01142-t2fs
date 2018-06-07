@@ -17,7 +17,10 @@ int main()
     //int handle = opendir2("/dir1/");
     //int handle = opendir2("/dir1");
     //int handle = opendir2("/dir1/../dir1/dir12");
-    int handle = opendir2("/");
+    //int handle = opendir2("/");
+
+    //printf("MK %d\n", mkdir2("batata2"));
+    int handle = opendir2("/batata");
 
     if( handle != -1 )
     {

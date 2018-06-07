@@ -240,7 +240,7 @@ char* __get_abspath(char *path, char *cwdPath)
 
     auxPathname = strdup(path);
 
-    absPathname = (char*)malloc(sizeof(char) * (strlen(path) + strlen(cwdPath) + 1));
+    absPathname = (char*)calloc(strlen(path) + strlen(cwdPath) + 2, sizeof(char));
     strcpy(absPathname, "");
 
     if( strlen(path) > 0 )
@@ -263,6 +263,7 @@ char* __get_abspath(char *path, char *cwdPath)
             {
                 strcat(absPathname, "/");
             }
+
             strcat(absPathname, auxPathname);
         }
 
