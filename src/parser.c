@@ -194,7 +194,7 @@ BYTE* inode_to_buffer(struct t2fs_inode *inode)
 Função: Cria um buffer a partir de um 't2fs_record'
 
 Entra:
-    inode -> inode a ser transformado
+    record -> record a ser transformado
 
 Saída:
     O buffer representando a estrutura.
@@ -219,6 +219,20 @@ BYTE* record_to_buffer(struct t2fs_record *record)
     }
 
     return buffer;
+}
+
+/*-----------------------------------------------------------------------------
+Função: Cria um buffer a partir de um 'DWORD'
+
+Entra:
+    dword -> dword a ser transformado
+
+Saída:
+    O buffer representando a estrutura.
+-----------------------------------------------------------------------------*/
+unsigned char* dword_to_buffer(DWORD dword)
+{
+    return __convert_value_to_buffer(dword, 4);
 }
 
 /*-----------------------------------------------------------------------------

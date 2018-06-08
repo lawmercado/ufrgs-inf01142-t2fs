@@ -23,7 +23,10 @@ int main()
     printf("MK DIR %d\n", mkdir2("dir1/batata2"));
     //printf("RM DIR %d\n", rmdir2("dir1/batata"));
 
-    int handle = opendir2("/dir1");
+    int handle = opendir2("/dir1/dir11");
+    int fhandle = open2("/dir1/dir11/file111");
+
+    printf("FHANDLE %d\n", fhandle);
 
     if( handle != -1 )
     {

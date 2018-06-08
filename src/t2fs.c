@@ -86,7 +86,7 @@ Função: Calcula o setor dado o número do inode
 Saída:
     Setor do inode informado.
 -----------------------------------------------------------------------------*/
-unsigned int __get_inode_sector(DWORD inodeNumber)
+unsigned int __inode_get_sector(DWORD inodeNumber)
 {
     unsigned int base_sector = (g_sb->superblockSize + g_sb->freeBlocksBitmapSize + g_sb->freeInodeBitmapSize) * g_sb->blockSize;
 
@@ -99,7 +99,7 @@ Função: Calcula o índice do inode dentro do setor conforme o seu número
 Saída:
     Índice do inode no setor.
 -----------------------------------------------------------------------------*/
-unsigned int __get_inode_idx(DWORD inodeNumber)
+unsigned int __inode_get_sector_idx(DWORD inodeNumber)
 {
     return (inodeNumber % (SECTOR_SIZE/sizeof(struct t2fs_inode))) * sizeof(struct t2fs_inode);
 }
@@ -110,7 +110,7 @@ Função: Calcula o setor de um dado bloco
 Saída:
     Setor base dos blocos de dados.
 -----------------------------------------------------------------------------*/
-unsigned int __get_data_block_sector(DWORD blockNumber)
+unsigned int __block_get_sector(DWORD blockNumber)
 {
     return blockNumber * g_sb->blockSize;
 }
@@ -125,17 +125,54 @@ Saída:
     Se a operação foi realizada com sucesso, retorna o inode
     Se ocorreu algum erro, retorna NULL.
 -----------------------------------------------------------------------------*/
-struct t2fs_inode* __get_inode(DWORD inodeNumber)
+struct t2fs_inode* __inode_get_by_idx(DWORD inodeNumber)
 {
     BYTE buffer[SECTOR_SIZE];
-    unsigned int idxInode = __get_inode_idx(inodeNumber);
+    unsigned int idxInode = __inode_get_sector_idx(inodeNumber);
 
-    if( read_sector(__get_inode_sector(inodeNumber), buffer) == OP_SUCCESS )
+    if( read_sector(__inode_get_sector(inodeNumber), buffer) == OP_SUCCESS )
     {
         return buffer_to_inode(buffer, idxInode);
     }
 
     return NULL;
+}
+
+/*-----------------------------------------------------------------------------
+Função: Cria um novo inode
+
+Entra:
+    inode -> dados a serem salvos
+    inodeNumber -> número do inode
+
+Saída:
+    Se a operação foi realizada com sucesso, retorna OP_SUCCESS
+    Se ocorreu algum erro, retorna OP_ERROR.
+-----------------------------------------------------------------------------*/
+int __inode_write(struct t2fs_inode *inode, int inodeNumber)
+{
+    BYTE buffer[SECTOR_SIZE], *buffer_inode = NULL;
+    unsigned int sector = __inode_get_sector(inodeNumber);
+    int idxInode = __inode_get_sector_idx(inodeNumber);
+    int i;
+
+    if( read_sector(sector, buffer) == OP_SUCCESS )
+    {
+        buffer_inode = inode_to_buffer(inode);
+
+        for(i = 0; i < sizeof(struct t2fs_inode); i++)
+        {
+            buffer[idxInode + i] = buffer_inode[i];
+        }
+
+        if( write_sector(sector, buffer) == OP_SUCCESS )
+        {
+            printf("DEBUG: Escreveu o inode\n");
+            return OP_SUCCESS;
+        }
+    }
+
+    return OP_ERROR;
 }
 
 /*-----------------------------------------------------------------------------
@@ -150,14 +187,14 @@ Saída:
     Se a operação foi realizada com sucesso, retorna um buffer com a entrada
     Se ocorreu algum erro, retorna NULL.
 -----------------------------------------------------------------------------*/
-BYTE* __get_block_entry(DWORD idxEntry, int size, DWORD blockNumber)
+BYTE* __block_get_entry(DWORD idxEntry, int size, DWORD blockNumber)
 {
     BYTE buffer[SECTOR_SIZE], *entryBuffer;
     DWORD idxSector = (idxEntry * size) / SECTOR_SIZE;
     DWORD idxSectorEntry = (idxEntry * size) % SECTOR_SIZE;
     int i;
 
-    if( read_sector(__get_data_block_sector(blockNumber) + idxSector, buffer) == OP_SUCCESS )
+    if( read_sector(__block_get_sector(blockNumber) + idxSector, buffer) == OP_SUCCESS )
     {
         entryBuffer = (BYTE*)malloc(size);
 
@@ -173,25 +210,61 @@ BYTE* __get_block_entry(DWORD idxEntry, int size, DWORD blockNumber)
 }
 
 /*-----------------------------------------------------------------------------
-Função: Calcula o bloco onde a entrada 'pointer' está
+Função: Escreve um ponteiro para um bloco num dado bloco de indireção
 
 Entra:
-    pointer -> ponteiro de entrada com referencia ao handler
-    size -> tamanho da entrada
-    inode -> inode onde procurar
+    idxPtr -> índice do ponteiro no bloco
+    blockNumber -> valor do ponteiro para o bloco
+    indBlockNumber -> bloco onde o ponteiro deve ser escrito
+
+Saída:
+    Se a operação foi realizada com sucesso, retorna OP_SUCCESS
+    Se ocorreu algum erro, retorna OP_ERROR.
+-----------------------------------------------------------------------------*/
+int __block_write_ptr(DWORD idxPtr, DWORD blockNumber, DWORD indBlockNumber)
+{
+    BYTE buffer[SECTOR_SIZE], *buffer_ptr;
+    unsigned int sector = indBlockNumber * g_sb->blockSize + ((idxPtr * sizeof(DWORD)) / SECTOR_SIZE);
+    int idxSectorPtr = (idxPtr % (SECTOR_SIZE/sizeof(DWORD))) * sizeof(DWORD);
+    int i;
+
+    if( read_sector(sector, buffer) == OP_SUCCESS )
+    {
+        buffer_ptr = dword_to_buffer(blockNumber);
+
+        for(i = 0; i < sizeof(DWORD); i++)
+        {
+            buffer[idxSectorPtr + i] = buffer_ptr[i];
+        }
+
+        if( write_sector(sector, buffer) == OP_SUCCESS )
+        {
+            printf("DEBUG: Escreveu o ponteiro\n");
+            return OP_SUCCESS;
+        }
+    }
+
+    return OP_ERROR;
+}
+
+/*-----------------------------------------------------------------------------
+Função: Navega sequencialmente pelos registros apontados por 'pointer', retornando
+        o bloco onde o registro se encontra
+
+Entra:
+    pointer -> 'pointer'-ézimo item
+    size -> tamanho do 'pointer'-ézimo item
+    inode -> inode que contém os ponteiros para os blocos de dados
 
 Saída:
     Se a operação foi realizada com sucesso, retorna o número do bloco
     Se ocorreu algum erro, retorna INVALID_PTR.
 -----------------------------------------------------------------------------*/
-DWORD __find_assoc_block(DWORD pointer, int size, struct t2fs_inode *inode)
+DWORD __block_navigate(DWORD pointer, int size, struct t2fs_inode *inode)
 {
     int entryPerBlock = (g_sb->blockSize * SECTOR_SIZE) / size;
     int entryBlock = pointer / entryPerBlock;
     DWORD dataBlockNumber = 0;
-
-    //printf("DEBUG: pointer: %d\n", pointer);
-    //printf("DEBUG: bloco procurado: %d\n", entryBlock);
 
     if( entryBlock < inode->blocksFileSize )
     {
@@ -205,26 +278,22 @@ DWORD __find_assoc_block(DWORD pointer, int size, struct t2fs_inode *inode)
         }
         else
         {
-            /* TODO: testar todo esse bloco */
+            int blockNumberPerBlock = (g_sb->blockSize * SECTOR_SIZE) / sizeof(DWORD);
+            int idxBase = entryBlock - 2;
 
-            int maxIdxIndBlock = g_sb->blockSize * (SECTOR_SIZE/sizeof(DWORD));
-            int idxIndBlock = entryBlock - 2;
-
-            if( idxIndBlock < maxIdxIndBlock  )
+            if( idxBase < blockNumberPerBlock  )
             {
-                printf("SINGLEINDPTR\n");
-
-                dataBlockNumber = buffer_to_dword(__get_block_entry(idxIndBlock, sizeof(DWORD), inode->singleIndPtr), 0);
+                dataBlockNumber = buffer_to_dword(__block_get_entry(idxBase, sizeof(DWORD), inode->singleIndPtr), 0);
             }
             else
             {
-                printf("DOUBLEINDPTR\n");
+                idxBase = entryBlock - blockNumberPerBlock - 2;
+                int idxIndBlockList = idxBase / blockNumberPerBlock;
+                int idxBlock = idxBase % blockNumberPerBlock;
 
-                int idxDoubleIndBlock = entryBlock - maxIdxIndBlock;
+                DWORD ptrBlockNumber = buffer_to_dword(__block_get_entry(idxIndBlockList, sizeof(DWORD), inode->doubleIndPtr), 0);
 
-                DWORD ptrBlockNumber = buffer_to_dword(__get_block_entry(idxDoubleIndBlock, sizeof(DWORD), inode->doubleIndPtr), 0);
-
-                dataBlockNumber = buffer_to_dword(__get_block_entry(idxIndBlock, sizeof(DWORD), ptrBlockNumber), 0);
+                dataBlockNumber = buffer_to_dword(__block_get_entry(idxBlock, sizeof(DWORD), ptrBlockNumber), 0);
             }
         }
 
@@ -232,6 +301,148 @@ DWORD __find_assoc_block(DWORD pointer, int size, struct t2fs_inode *inode)
     }
 
     return INVALID_PTR;
+}
+
+/*-----------------------------------------------------------------------------
+Função: Aloca um novo bloco de dados para o dado inode
+
+Entra:
+    inode -> inode no qual deve ser alocado o bloco
+    inodeNumber -> índice do inode
+
+Saída:
+    Se a operação foi realizada com sucesso, retorna OP_SUCCESS
+    Se ocorreu algum erro, retorna OP_ERROR.
+-----------------------------------------------------------------------------*/
+int __block_alocate(struct t2fs_inode *inode, DWORD inodeNumber)
+{
+    int idxBlockBase = inode->blocksFileSize;
+    int blockNumberPerBlock = (g_sb->blockSize * SECTOR_SIZE) / sizeof(DWORD);
+
+    DWORD dataBlockNumber = searchBitmap2(BITMAP_DADOS, 0);
+
+    if( dataBlockNumber > 0 )
+    {
+        if( idxBlockBase == 0 )
+        {
+            inode->dataPtr[0] = dataBlockNumber;
+
+            setBitmap2(BITMAP_DADOS, dataBlockNumber, 1);
+        }
+        else if( idxBlockBase == 1 )
+        {
+            inode->dataPtr[1] = dataBlockNumber;
+
+            setBitmap2(BITMAP_DADOS, dataBlockNumber, 1);
+        }
+        else
+        {
+            int idxBase = idxBlockBase - 2;
+
+            if( idxBase < blockNumberPerBlock )
+            {
+                if( inode->singleIndPtr == INVALID_PTR )
+                {
+                    int indBlockNumber = dataBlockNumber;
+
+                    setBitmap2(BITMAP_DADOS, indBlockNumber, 1);
+
+                    dataBlockNumber = searchBitmap2(BITMAP_DADOS, 0);
+
+                    if( dataBlockNumber <= 0 )
+                    {
+                        setBitmap2(BITMAP_DADOS, indBlockNumber, 0);
+
+                        return OP_ERROR;
+                    }
+                    else
+                    {
+                        inode->singleIndPtr = indBlockNumber;
+                    }
+                }
+
+                if( __block_write_ptr(idxBase, dataBlockNumber, inode->singleIndPtr) == OP_SUCCESS )
+                {
+                    setBitmap2(BITMAP_DADOS, dataBlockNumber, 1);
+                }
+            }
+            else
+            {
+                idxBase = idxBlockBase - blockNumberPerBlock - 2;
+                int idxIndBlockList = idxBase / blockNumberPerBlock;
+                int idxBlock = idxBase % blockNumberPerBlock;
+
+                if( inode->doubleIndPtr == INVALID_PTR )
+                {
+                    int doubleIndBlockNumber = dataBlockNumber;
+
+                    setBitmap2(BITMAP_DADOS, doubleIndBlockNumber, 1);
+
+                    dataBlockNumber = searchBitmap2(BITMAP_DADOS, 0);
+
+                    if( dataBlockNumber <= 0 )
+                    {
+                        setBitmap2(BITMAP_DADOS, doubleIndBlockNumber, 0);
+
+                        return OP_ERROR;
+                    }
+                    else
+                    {
+                        inode->doubleIndPtr = doubleIndBlockNumber;
+
+                        int i;
+
+                        for( i = 0; i < blockNumberPerBlock; i++ )
+                        {
+                            __block_write_ptr(i, INVALID_PTR, inode->doubleIndPtr);
+                        }
+                    }
+                }
+
+                DWORD ptrBlockNumber = buffer_to_dword(__block_get_entry(idxIndBlockList, sizeof(DWORD), inode->doubleIndPtr), 0);
+
+                if( ptrBlockNumber == INVALID_PTR )
+                {
+                    int indBlockNumber = dataBlockNumber;
+
+                    setBitmap2(BITMAP_DADOS, indBlockNumber, 1);
+
+                    dataBlockNumber = searchBitmap2(BITMAP_DADOS, 0);
+
+                    if( dataBlockNumber <= 0 )
+                    {
+                        setBitmap2(BITMAP_DADOS, indBlockNumber, 0);
+
+                        return OP_ERROR;
+                    }
+                    else
+                    {
+                        ptrBlockNumber = indBlockNumber;
+                        __block_write_ptr(idxIndBlockList, ptrBlockNumber, inode->doubleIndPtr);
+                    }
+                }
+
+                if( __block_write_ptr(idxBlock, dataBlockNumber, ptrBlockNumber) == OP_SUCCESS )
+                {
+                    setBitmap2(BITMAP_DADOS, dataBlockNumber, 1);
+                }
+            }
+        }
+
+        inode->blocksFileSize += 1;
+        inode->bytesFileSize = inode->blocksFileSize * g_sb->blockSize * SECTOR_SIZE;
+
+        if( __inode_write(inode, inodeNumber) == OP_SUCCESS )
+        {
+            return OP_SUCCESS;
+        }
+        else
+        {
+            setBitmap2(BITMAP_DADOS, dataBlockNumber, 0);
+        }
+    }
+
+    return OP_ERROR;
 }
 
 /*-----------------------------------------------------------------------------
@@ -246,16 +457,16 @@ Saída:
     Se a operação foi realizada com sucesso, retorna um buffer com a entrada
     Se ocorreu algum erro, retorna NULL.
 -----------------------------------------------------------------------------*/
-BYTE* __read_entry(DWORD pointer, int size, struct t2fs_inode *inode)
+BYTE* __entry_read(DWORD pointer, int size, struct t2fs_inode *inode)
 {
-    DWORD dataBlockNumber = __find_assoc_block(pointer, size, inode);
+    DWORD dataBlockNumber = __block_navigate(pointer, size, inode);
 
     if( dataBlockNumber != INVALID_PTR )
     {
         int entryPerBlock = (g_sb->blockSize * SECTOR_SIZE) / size;
         int idxEntry = pointer % entryPerBlock;
 
-        return __get_block_entry(idxEntry, size, dataBlockNumber);
+        return __block_get_entry(idxEntry, size, dataBlockNumber);
     }
 
     return NULL;
@@ -272,9 +483,9 @@ Saída:
     Se a operação foi realizada com sucesso, retorna o record
     Se ocorreu algum erro, retorna NULL.
 -----------------------------------------------------------------------------*/
-struct t2fs_record* __get_record_by_idx(DWORD pointer, struct t2fs_inode *inode)
+struct t2fs_record* __record_get_by_idx(DWORD pointer, struct t2fs_inode *inode)
 {
-    BYTE* entryBuffer = __read_entry(pointer, sizeof(struct t2fs_record), inode);
+    BYTE* entryBuffer = __entry_read(pointer, sizeof(struct t2fs_record), inode);
     struct t2fs_record *record = NULL;
 
     if( entryBuffer != NULL )
@@ -298,14 +509,14 @@ Saída:
     Se a operação foi realizada com sucesso, retorna o record
     Se ocorreu algum erro, retorna NULL.
 -----------------------------------------------------------------------------*/
-struct t2fs_record* __get_record_by_name(char *name, struct t2fs_inode *inode)
+struct t2fs_record* __record_get_by_name(char *name, struct t2fs_inode *inode)
 {
     int pointer = 0;
     struct t2fs_record *record = NULL, *foundRecord = NULL;
 
     do
     {
-        record = __get_record_by_idx(pointer, inode);
+        record = __record_get_by_idx(pointer, inode);
 
         if( record != NULL )
         {
@@ -327,15 +538,26 @@ struct t2fs_record* __get_record_by_name(char *name, struct t2fs_inode *inode)
     return foundRecord;
 }
 
-int __get_idx_record_by_name(char *name, struct t2fs_inode *inode)
+/*-----------------------------------------------------------------------------
+Função: Encontra o índice de um 'record' pelo seu nome
+
+Entra:
+    name -> nome pelo qual procurar
+    inode -> inode onde procurar
+
+Saída:
+    Se a operação foi realizada com sucesso, retorna o índice (int. >= 0)
+    Se ocorreu algum erro, retorna INVALID_PTR.
+-----------------------------------------------------------------------------*/
+DWORD __record_get_idx_by_name(char *name, struct t2fs_inode *inode)
 {
     int pointer = 0;
-    int idxFound = -1;
+    int idxFound = INVALID_PTR;
     struct t2fs_record *record = NULL;
 
     do
     {
-        record = __get_record_by_idx(pointer, inode);
+        record = __record_get_by_idx(pointer, inode);
 
         if( record != NULL )
         {
@@ -358,24 +580,23 @@ int __get_idx_record_by_name(char *name, struct t2fs_inode *inode)
 }
 
 /*-----------------------------------------------------------------------------
-Função:
+Função: Encontra o primeiro registro de 'record' livre
 
 Entra:
-    name -> nome da entrada
-    inode -> inode para procurar
+    inode -> inode onde procurar
 
 Saída:
-    Se a operação foi realizada com sucesso, retorna o record
-    Se ocorreu algum erro, retorna NULL.
+    Se a operação foi realizada com sucesso, retorna o índice (int. >= 0)
+    Se ocorreu algum erro, retorna INVALID_PTR.
 -----------------------------------------------------------------------------*/
-DWORD __get_idx_free_record(struct t2fs_inode *inode)
+DWORD __record_get_free_idx(struct t2fs_inode *inode)
 {
     int pointer = 0;
     struct t2fs_record *record = NULL;
 
     do
     {
-        record = __get_record_by_idx(pointer, inode);
+        record = __record_get_by_idx(pointer, inode);
 
         if( record != NULL )
         {
@@ -389,44 +610,7 @@ DWORD __get_idx_free_record(struct t2fs_inode *inode)
 
     } while( record != NULL );
 
-    return OP_ERROR;
-}
-
-/*-----------------------------------------------------------------------------
-Função: Cria um novo inode
-
-Entra:
-    inode -> dados a serem salvos
-    inodeNumber -> número do inode
-
-Saída:
-    Se a operação foi realizada com sucesso, retorna OP_SUCCESS
-    Se ocorreu algum erro, retorna OP_ERROR.
------------------------------------------------------------------------------*/
-int __write_inode(struct t2fs_inode *inode, int inodeNumber)
-{
-    BYTE buffer[SECTOR_SIZE], *buffer_inode = NULL;
-    unsigned int sector = __get_inode_sector(inodeNumber);
-    int idxInode = __get_inode_idx(inodeNumber);
-    int i;
-
-    if( read_sector(sector, buffer) == OP_SUCCESS )
-    {
-        buffer_inode = inode_to_buffer(inode);
-
-        for(i = 0; i < sizeof(struct t2fs_inode); i++)
-        {
-            buffer[idxInode + i] = buffer_inode[i];
-        }
-
-        if( write_sector(sector, buffer) == OP_SUCCESS )
-        {
-            printf("DEBUG: Escreveu o inode\n");
-            return OP_SUCCESS;
-        }
-    }
-
-    return OP_ERROR;
+    return INVALID_PTR;
 }
 
 /*-----------------------------------------------------------------------------
@@ -441,10 +625,10 @@ Saída:
     Se a operação foi realizada com sucesso, retorna OP_SUCCESS
     Se ocorreu algum erro, retorna OP_ERROR.
 -----------------------------------------------------------------------------*/
-int __write_record(struct t2fs_record *record, int idxFreeRecord, int blockNumber)
+int __record_write(struct t2fs_record *record, int idxFreeRecord, int blockNumber)
 {
     BYTE buffer[SECTOR_SIZE], *buffer_record = NULL;
-    unsigned int sector = __get_data_block_sector(blockNumber) + (idxFreeRecord / (SECTOR_SIZE/sizeof(struct t2fs_record)));
+    unsigned int sector = __block_get_sector(blockNumber) + (idxFreeRecord / (SECTOR_SIZE/sizeof(struct t2fs_record)));
     int idxRecord = (idxFreeRecord % (SECTOR_SIZE/sizeof(struct t2fs_record))) * sizeof(struct t2fs_record);
     int i;
 
@@ -479,13 +663,21 @@ Saída:
     Se a operação foi realizada com sucesso, retorna OP_SUCCESS
     Se ocorreu algum erro, retorna OP_ERROR.
 -----------------------------------------------------------------------------*/
-int __alocate_record(char *name, int type, struct t2fs_record* parentRecord)
+int __record_alocate(char *name, int type, struct t2fs_record* parentRecord)
 {
     struct t2fs_record *record = NULL;
     struct t2fs_inode *inode = NULL;
 
-    struct t2fs_inode *parentInode = __get_inode(parentRecord->inodeNumber);
-    int idxFreeRecord = __get_idx_free_record(parentInode);
+    struct t2fs_inode *parentInode = __inode_get_by_idx(parentRecord->inodeNumber);
+    int idxFreeRecord = __record_get_free_idx(parentInode);
+
+    if( idxFreeRecord == OP_ERROR )
+    {
+        if( __block_alocate(parentInode, parentRecord->inodeNumber) == OP_SUCCESS )
+        {
+            idxFreeRecord = __record_get_free_idx(parentInode);
+        }
+    }
 
     if( idxFreeRecord != OP_ERROR )
     {
@@ -511,9 +703,9 @@ int __alocate_record(char *name, int type, struct t2fs_record* parentRecord)
                 inode->singleIndPtr = INVALID_PTR;
                 inode->doubleIndPtr = INVALID_PTR;
 
-                if( __write_inode(inode, b_inode) == OP_SUCCESS )
+                if( __inode_write(inode, b_inode) == OP_SUCCESS )
                 {
-                    if( __write_record(record, idxFreeRecord, __find_assoc_block(idxFreeRecord, sizeof(struct t2fs_record), parentInode)) == OP_SUCCESS )
+                    if( __record_write(record, idxFreeRecord, __block_navigate(idxFreeRecord, sizeof(struct t2fs_record), parentInode)) == OP_SUCCESS )
                     {
                         setBitmap2(BITMAP_INODE, b_inode, 1);
                         setBitmap2(BITMAP_DADOS, b_dados, 1);
@@ -531,8 +723,8 @@ int __alocate_record(char *name, int type, struct t2fs_record* parentRecord)
                             selfParentRecord->TypeVal = TYPEVAL_DIRETORIO;
                             selfParentRecord->inodeNumber = parentRecord->inodeNumber;
 
-                            __write_record(selfRecord, 0, b_dados);
-                            __write_record(selfParentRecord, 1, b_dados);
+                            __record_write(selfRecord, 0, b_dados);
+                            __record_write(selfParentRecord, 1, b_dados);
 
                             free(selfRecord);
                             free(selfParentRecord);
@@ -563,7 +755,7 @@ Saída:
     Se a operação foi realizada com sucesso, retorna o record associado
     Se ocorreu algum erro, retorna NULL.
 -----------------------------------------------------------------------------*/
-struct t2fs_record* __navigate(char *parsedPath)
+struct t2fs_record* __record_navigate(char *parsedPath)
 {
     char *auxPathname;
     struct t2fs_record *record = NULL;
@@ -579,13 +771,13 @@ struct t2fs_record* __navigate(char *parsedPath)
         // Caminho absoluto
         if( auxPathname[0] == '/' )
         {
-            record = __get_record_by_name(".", g_ri);
+            record = __record_get_by_name(".", g_ri);
             inode = g_ri;
         }
         else
         {
             record = g_cwd_record;
-            inode = __get_inode(g_cwd_record->inodeNumber);
+            inode = __inode_get_by_idx(g_cwd_record->inodeNumber);
         }
 
         char *token;
@@ -594,11 +786,11 @@ struct t2fs_record* __navigate(char *parsedPath)
         {
             if( strlen(token) > 0 )
             {
-                record = __get_record_by_name(token, inode);
+                record = __record_get_by_name(token, inode);
 
                 if( record != NULL )
                 {
-                    inode = __get_inode(record->inodeNumber);
+                    inode = __inode_get_by_idx(record->inodeNumber);
                 }
                 else
                 {
@@ -624,24 +816,24 @@ Saída:
     Se a operação foi realizada com sucesso, retorna OP_SUCCESS
     Se ocorreu algum erro, retorna OP_ERROR.
 -----------------------------------------------------------------------------*/
-int __create_record(char *pathname, int type)
+int __record_create(char *pathname, int type)
 {
     char* parsedPath = parse_path(pathname, g_cwd);
 
     if( parsedPath != NULL )
     {
-        struct t2fs_record *record = __navigate(parsedPath);
+        struct t2fs_record *record = __record_navigate(parsedPath);
 
         // Se já não existe algum record com esse nome
         if( record == NULL )
         {
             char* recordName = extract_recordname(parsedPath);
-            struct t2fs_record *parentRecord = __navigate(parsedPath);
+            struct t2fs_record *parentRecord = __record_navigate(parsedPath);
 
             // Se o record pai existe
             if( parentRecord != NULL && strlen(recordName) > 0 )
             {
-                return __alocate_record(recordName, type, parentRecord);
+                return __record_alocate(recordName, type, parentRecord);
             }
         }
     }
@@ -649,7 +841,7 @@ int __create_record(char *pathname, int type)
     return OP_ERROR;
 }
 
-int __is_record_opened(char* recordName, int type, char* recordWd)
+int __record_is_opened(char* recordName, int type, char* recordWd)
 {
     HANDLER *handler = NULL;
     int i;
@@ -680,13 +872,13 @@ int __is_record_opened(char* recordName, int type, char* recordWd)
     return 0;
 }
 
-int __is_dir_empty(struct t2fs_record* dir)
+int __record_is_dir_empty(struct t2fs_record* dir)
 {
     struct t2fs_record *record;
-    struct t2fs_inode *inode = __get_inode(dir->inodeNumber);
+    struct t2fs_inode *inode = __inode_get_by_idx(dir->inodeNumber);
     int pointer = 0, recordCounter = 0;
 
-    record = __get_record_by_idx(pointer, inode);
+    record = __record_get_by_idx(pointer, inode);
 
     while( record != NULL )
     {
@@ -703,27 +895,27 @@ int __is_dir_empty(struct t2fs_record* dir)
         }
 
         pointer++;
-        record = __get_record_by_idx(pointer, inode);
+        record = __record_get_by_idx(pointer, inode);
     }
 
     return recordCounter == 0;
 }
 
-int __dealocate_record(char* name, struct t2fs_record* parentRecord)
+int __record_free(char* name, struct t2fs_record* parentRecord)
 {
     struct t2fs_inode *inode;
-    struct t2fs_inode *parentInode = __get_inode(parentRecord->inodeNumber);
+    struct t2fs_inode *parentInode = __inode_get_by_idx(parentRecord->inodeNumber);
     struct t2fs_record *record;
-    int idxRecord = __get_idx_record_by_name(name, parentInode);
+    int idxRecord = __record_get_idx_by_name(name, parentInode);
 
     if( idxRecord != OP_ERROR )
     {
-        record = __get_record_by_name(name, parentInode);
-        inode = __get_inode(record->inodeNumber);
+        record = __record_get_by_name(name, parentInode);
+        inode = __inode_get_by_idx(record->inodeNumber);
 
         record->TypeVal = TYPEVAL_INVALIDO;
 
-        __write_record(record, idxRecord, __find_assoc_block(idxRecord, sizeof(struct t2fs_record), parentInode));
+        __record_write(record, idxRecord, __block_navigate(idxRecord, sizeof(struct t2fs_record), parentInode));
 
         // TODO: desalocar todo os blocos no inode
         setBitmap2(BITMAP_DADOS, inode->dataPtr[0], 0);
@@ -746,28 +938,28 @@ Saída:
     Se a operação foi realizada com sucesso, retorna OP_SUCCESS
     Se ocorreu algum erro, retorna OP_ERROR.
 -----------------------------------------------------------------------------*/
-int __delete_record(char *pathname, int type)
+int __record_delete(char *pathname, int type)
 {
     char* parsedPath = parse_path(pathname, g_cwd);
 
     if( parsedPath != NULL )
     {
-        struct t2fs_record *record = __navigate(parsedPath);
+        struct t2fs_record *record = __record_navigate(parsedPath);
 
         // Se existe algum record com esse nome
         if( record != NULL )
         {
             char* recordName = extract_recordname(parsedPath);
-            struct t2fs_record *parentRecord = __navigate(parsedPath);
+            struct t2fs_record *parentRecord = __record_navigate(parsedPath);
 
             // Se é válido e se é do tipo indicado
             if( strlen(recordName) > 0 && record->TypeVal == type )
             {
-                if( !__is_record_opened(recordName, type, parsedPath) )
+                if( !__record_is_opened(recordName, type, parsedPath) )
                 {
                     if( type == TYPEVAL_DIRETORIO )
                     {
-                        if( !__is_dir_empty(record) )
+                        if( !__record_is_dir_empty(record) )
                         {
                             printf("DEBUG: Diretório não vazio\n");
 
@@ -775,7 +967,7 @@ int __delete_record(char *pathname, int type)
                         }
                     }
 
-                    return __dealocate_record(recordName, parentRecord);
+                    return __record_free(recordName, parentRecord);
                 }
                 else
                 {
@@ -789,43 +981,89 @@ int __delete_record(char *pathname, int type)
 }
 
 /*-----------------------------------------------------------------------------
-Função: Encontra (ou não) um handler de arquivo disponível
+Função: Encontra (ou não) um handler de diretório e ou arquivo disponível
+
+Entra:
+    type -> tipo do record (o que implica no tipo do handler)
 
 Saída:
     Se há handler disponível, retorna o índice
     Se ocorreu algum erro, retorn OP_ERROR.
 -----------------------------------------------------------------------------*/
-FILE2 __get_free_file_handler()
+int __handler_get_free_idx(int type)
 {
     int i;
+    HANDLER *handler;
 
-    for(i = 0; i < MAX_NUM_HANDLERS; i++)
+    if( type == TYPEVAL_REGULAR || type == TYPEVAL_DIRETORIO )
     {
-        if( g_files[i].free )
+        handler = type == TYPEVAL_REGULAR ? g_files : g_dirs;
+
+        for(i = 0; i < MAX_NUM_HANDLERS; i++)
         {
-            return i;
+            if( handler[i].free )
+            {
+                return i;
+            }
         }
     }
 
-    return OP_ERROR;
+    return INVALID_PTR;
 }
 
-/*-----------------------------------------------------------------------------
-Função: Encontra (ou não) um handler de diretório disponível
-
-Saída:
-    Se há handler disponível, retorna o índice
-    Se ocorreu algum erro, retorn OP_ERROR.
------------------------------------------------------------------------------*/
-DIR2 __get_free_dir_handler()
+int __handler_alocate(char* pathname, int type)
 {
-    int i;
+    char* parsedPath = parse_path(pathname, g_cwd);
 
-    for(i = 0; i < MAX_NUM_HANDLERS; i++)
+    if( parsedPath != NULL )
     {
-        if( g_dirs[i].free )
+        struct t2fs_record *record = __record_navigate(parsedPath);
+
+        if( record != NULL )
         {
-            return i;
+            int freeHandler = -1;
+            HANDLER *handler = NULL;
+
+            freeHandler = __handler_get_free_idx(type);
+            handler = type == TYPEVAL_REGULAR ? g_files : g_dirs;
+
+            if( freeHandler != INVALID_PTR )
+            {
+                handler[freeHandler].record = record;
+                handler[freeHandler].pointer = 0;
+                handler[freeHandler].free = 0;
+
+                // Tira o nome do record sendo adicionado do path
+                extract_recordname(parsedPath);
+                handler[freeHandler].wd = parsedPath;
+
+                return freeHandler;
+            }
+        }
+    }
+
+    return INVALID_PTR;
+}
+
+int __handler_free(int handle, int type)
+{
+    HANDLER *handler = NULL;
+
+    if( handle >= 0 )
+    {
+        if( type == TYPEVAL_REGULAR || type == TYPEVAL_DIRETORIO )
+        {
+            handler = type == TYPEVAL_REGULAR ? g_files : g_dirs;
+
+            if( !(handler[handle].free || handler[handle].record == NULL) )
+            {
+                handler[handle].record = NULL;
+                handler[handle].wd = NULL;
+                handler[handle].pointer = 0;
+                handler[handle].free = 1;
+
+                return OP_SUCCESS;
+            }
         }
     }
 
@@ -839,7 +1077,7 @@ Saída:
     Se a operação foi realizada com sucesso, retorna OP_SUCCESS
     Se ocorreu algum erro, retorna OP_ERROR.
 -----------------------------------------------------------------------------*/
-int __read_superblock()
+int __init_superblock_read()
 {
     BYTE buffer[SECTOR_SIZE];
     unsigned int sector_superblock = 0;
@@ -861,9 +1099,9 @@ Saída:
     Se a operação foi realizada com sucesso, retorna OP_SUCCESS
     Se ocorreu algum erro, retorna OP_ERROR.
 -----------------------------------------------------------------------------*/
-int __read_rootInode()
+int __init_rootinode_read()
 {
-    g_ri = __get_inode(0);
+    g_ri = __inode_get_by_idx(0);
 
     if( g_ri != NULL )
     {
@@ -880,11 +1118,11 @@ Saída:
     Se a operação foi realizada com sucesso, retorna OP_SUCCESS
     Se ocorreu algum erro, retorna OP_ERROR.
 -----------------------------------------------------------------------------*/
-int __initialize()
+int __init()
 {
     int i;
 
-    if( __read_superblock() == OP_SUCCESS && __read_rootInode() == OP_SUCCESS )
+    if( __init_superblock_read() == OP_SUCCESS && __init_rootinode_read() == OP_SUCCESS )
     {
         for(i = 0; i < MAX_NUM_HANDLERS; i++)
         {
@@ -898,7 +1136,7 @@ int __initialize()
         }
 
         g_cwd = "/";
-        g_cwd_record = __get_record_by_name(".", g_ri);
+        g_cwd_record = __record_get_by_name(".", g_ri);
 
         g_initialized = 1;
 
@@ -950,18 +1188,16 @@ Saída:	Se a operação foi realizada com sucesso, a função retorna o handle d
 -----------------------------------------------------------------------------*/
 FILE2 create2 (char *filename)
 {
-    /* TODO: testar */
-
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
 
     }
 
-    return __create_record(filename, TYPEVAL_REGULAR);
+    return __record_create(filename, TYPEVAL_REGULAR);
 }
 
 /*-----------------------------------------------------------------------------
@@ -977,13 +1213,13 @@ int delete2 (char *filename)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
     }
 
-    return __delete_record(filename, TYPEVAL_REGULAR);
+    return __record_delete(filename, TYPEVAL_REGULAR);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1004,13 +1240,17 @@ FILE2 open2 (char *filename)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
     }
 
-    return OP_ERROR;
+    int oi = __handler_alocate(filename, TYPEVAL_REGULAR);
+
+    __block_alocate(__inode_get_by_idx(g_files[oi].record->inodeNumber), g_files[oi].record->inodeNumber);
+
+    return oi;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1025,13 +1265,13 @@ int close2 (FILE2 handle)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
     }
 
-    return OP_ERROR;
+    return __handler_free(handle, TYPEVAL_REGULAR);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1051,7 +1291,7 @@ int read2 (FILE2 handle, char *buffer, int size)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
@@ -1076,7 +1316,7 @@ int write2 (FILE2 handle, char *buffer, int size)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
@@ -1100,7 +1340,7 @@ int truncate2 (FILE2 handle)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
@@ -1126,7 +1366,7 @@ int seek2 (FILE2 handle, DWORD offset)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
@@ -1151,13 +1391,13 @@ int mkdir2 (char *pathname)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
     }
 
-    return __create_record(pathname, TYPEVAL_DIRETORIO);
+    return __record_create(pathname, TYPEVAL_DIRETORIO);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1179,13 +1419,13 @@ int rmdir2 (char *pathname)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
     }
 
-    return __delete_record(pathname, TYPEVAL_DIRETORIO);
+    return __record_delete(pathname, TYPEVAL_DIRETORIO);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1204,7 +1444,7 @@ int chdir2 (char *pathname)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
@@ -1214,7 +1454,7 @@ int chdir2 (char *pathname)
 
     if( parsedPath != NULL )
     {
-        struct t2fs_record *record = __navigate(parsedPath);
+        struct t2fs_record *record = __record_navigate(parsedPath);
 
         if( record != NULL )
         {
@@ -1249,7 +1489,7 @@ int getcwd2 (char *pathname, int size)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
@@ -1284,38 +1524,13 @@ DIR2 opendir2 (char *pathname)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
     }
 
-    char* parsedPath = parse_path(pathname, g_cwd);
-
-    if( parsedPath != NULL )
-    {
-        //struct t2fs_record *record = __navigate(parsedPath);
-        struct t2fs_record *record = __navigate(parsedPath);
-        DIR2 freeHandler = __get_free_dir_handler();
-
-        if( freeHandler != OP_ERROR && record != NULL )
-        {
-            if( record->TypeVal == TYPEVAL_DIRETORIO )
-            {
-                g_dirs[freeHandler].record = record;
-                g_dirs[freeHandler].pointer = 0;
-                g_dirs[freeHandler].free = 0;
-
-                // Tira o nome do record sendo adicionado do path
-                extract_recordname(parsedPath);
-                g_dirs[freeHandler].wd = parsedPath;
-
-                return freeHandler;
-            }
-        }
-    }
-
-    return OP_ERROR;
+    return __handler_alocate(pathname, TYPEVAL_DIRETORIO);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1337,7 +1552,7 @@ int readdir2 (DIR2 handle, DIRENT2 *dentry)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
@@ -1348,16 +1563,16 @@ int readdir2 (DIR2 handle, DIRENT2 *dentry)
         if( !(g_dirs[handle].free || g_dirs[handle].record == NULL) )
         {
             struct t2fs_record *record;
-            struct t2fs_inode *inode = __get_inode(g_dirs[handle].record->inodeNumber);
+            struct t2fs_inode *inode = __inode_get_by_idx(g_dirs[handle].record->inodeNumber);
 
-            record = __get_record_by_idx(g_dirs[handle].pointer, inode);
+            record = __record_get_by_idx(g_dirs[handle].pointer, inode);
 
             if( record != NULL )
             {
                 while( record->TypeVal == TYPEVAL_INVALIDO )
                 {
                     g_dirs[handle].pointer += 1;
-                    record = __get_record_by_idx(g_dirs[handle].pointer, inode);
+                    record = __record_get_by_idx(g_dirs[handle].pointer, inode);
 
                     if( record == NULL )
                     {
@@ -1371,7 +1586,7 @@ int readdir2 (DIR2 handle, DIRENT2 *dentry)
                     {
                         strcpy(dentry->name, record->name);
                         dentry->fileType = record->TypeVal;
-                        dentry->fileSize = inode->bytesFileSize;
+                        dentry->fileSize = (__inode_get_by_idx(record->inodeNumber))->bytesFileSize;
 
                         g_dirs[handle].pointer += 1;
 
@@ -1399,21 +1614,11 @@ int closedir2 (DIR2 handle)
 {
     if( !g_initialized )
     {
-        if( __initialize() != 0 )
+        if( __init() != 0 )
         {
             return OP_ERROR;
         }
     }
 
-    if( g_dirs[handle].free || g_dirs[handle].record == NULL )
-    {
-        return OP_ERROR;
-    }
-
-    g_dirs[handle].record = NULL;
-    g_dirs[handle].wd = NULL;
-    g_dirs[handle].pointer = 0;
-    g_dirs[handle].free = 1;
-
-    return OP_SUCCESS;
+    return __handler_free(handle, TYPEVAL_DIRETORIO);
 }

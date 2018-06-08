@@ -64,12 +64,23 @@ unsigned char* inode_to_buffer(struct t2fs_inode *inode);
 Função: Cria um buffer a partir de um 't2fs_record'
 
 Entra:
-    inode -> inode a ser transformado
+    record -> record a ser transformado
 
 Saída:
     O buffer representando a estrutura.
 -----------------------------------------------------------------------------*/
 unsigned char* record_to_buffer(struct t2fs_record *record);
+
+/*-----------------------------------------------------------------------------
+Função: Cria um buffer a partir de um 'DWORD'
+
+Entra:
+    dword -> dword a ser transformado
+
+Saída:
+    O buffer representando a estrutura.
+-----------------------------------------------------------------------------*/
+unsigned char* dword_to_buffer(DWORD dword);
 
 /*-----------------------------------------------------------------------------
 Função: Gera o caminho absoluto, removendo os links entre diretórios
