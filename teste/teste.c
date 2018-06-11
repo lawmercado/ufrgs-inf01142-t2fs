@@ -19,14 +19,23 @@ int main()
     //int handle = opendir2("/dir1/../dir1/dir12");
     //int handle = opendir2("/");
 
-    printf("MK DIR %d\n", mkdir2("dir1/batata"));
-    printf("MK DIR %d\n", mkdir2("dir1/batata2"));
+    //printf("MK DIR %d\n", mkdir2("dir1/batata"));
+    //printf("MK DIR %d\n", mkdir2("dir1/batata2"));
+    //printf("MK DIR %d\n", mkdir2("dir1/batata3"));
+    //printf("DEL %d\n", delete2("dir1/arq_batata.txt"));
     //printf("RM DIR %d\n", rmdir2("dir1/batata"));
 
     int handle = opendir2("/dir1/dir11");
     int fhandle = open2("/dir1/dir11/file111");
 
-    printf("FHANDLE %d\n", fhandle);
+    char buffer[90];
+    seek2(fhandle, -1);
+    printf("WRITE %d\n", write2(fhandle, "BATATã", 6));
+    seek2(fhandle, 5);
+    truncate2(fhandle);
+    seek2(fhandle, 0);
+    read2(fhandle, buffer, 90);
+    printf("READ %s\n", buffer);
 
     if( handle != -1 )
     {
