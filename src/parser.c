@@ -403,7 +403,15 @@ char* __get_simplified_path(char *absPathname)
             {
                 strcpy(auxRecord, records[i+1]);
                 strcpy(records[i+1], records[i]);
-                strcpy(records[i-1], auxRecord);
+                
+                if(i > 0)
+                {
+                    strcpy(records[i-1], auxRecord);
+                }
+                else
+                {
+                    strcpy(records[i], auxRecord);
+                }
             }
 
             numRecords -= 2;

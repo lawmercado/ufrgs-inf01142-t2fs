@@ -10,6 +10,8 @@
 
 #define	INVALID_PTR	-1
 
+#define MAX_NUM_HANDLERS 10
+
 typedef int FILE2;
 typedef int DIR2;
 
