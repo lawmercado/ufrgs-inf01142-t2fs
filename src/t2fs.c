@@ -380,7 +380,7 @@ int __inode_write_bytes(DWORD pointer, char *buffer, int size, struct t2fs_inode
 {
     BYTE readBuffer[SECTOR_SIZE];
     DWORD idxBloco = pointer / (g_sb->blockSize * SECTOR_SIZE);
-    DWORD idxSector = (pointer * sizeof(BYTE)) / SECTOR_SIZE;
+    DWORD idxSector = ((pointer * sizeof(BYTE)) / SECTOR_SIZE) % g_sb->blockSize;
     DWORD idxSectorStart = (pointer * sizeof(BYTE)) % SECTOR_SIZE;
     int idxBuffer = 0;
     int i, j, k;
@@ -388,12 +388,11 @@ int __inode_write_bytes(DWORD pointer, char *buffer, int size, struct t2fs_inode
     for( k = 0; k <= size / (g_sb->blockSize * SECTOR_SIZE); k++ )
     {
         DWORD blockNumber = __block_get_by_idx(idxBloco + k, inode);
-
-        for( i = idxSector; i < g_sb->blockSize && idxBuffer <= size; i++ )
+        for( i = idxSector; i < g_sb->blockSize && idxBuffer < size; i++ )
         {
             if( read_sector(__block_get_sector(blockNumber) + i, readBuffer) == OP_SUCCESS )
             {
-                for( j = idxSectorStart; j < SECTOR_SIZE && idxBuffer <= size; j++ )
+                for( j = idxSectorStart; j < SECTOR_SIZE && idxBuffer < size; j++ )
                 {
                     readBuffer[j] = (BYTE) buffer[idxBuffer];
                     idxBuffer++;
@@ -407,6 +406,54 @@ int __inode_write_bytes(DWORD pointer, char *buffer, int size, struct t2fs_inode
                 {
                     return OP_ERROR;
                 }
+            }
+            else
+            {
+                return OP_ERROR;
+            }
+        }
+    }
+
+    return OP_SUCCESS;
+}
+
+/*-----------------------------------------------------------------------------
+Função: Lê sequencialmente pelos registros até encontrar o registro apontado
+        por 'pointer', retornando o bloco onde este se encontra
+
+Entra:
+    pointer -> 'pointer'-ézimo item
+    buffer -> buffer a ser escrito
+    size -> tamanho do buffer a ser escrito
+    inode -> inode que contém as informações de onde escrever
+
+Saída:
+    Se a operação foi realizada com sucesso, retorna OP_SUCCESS
+    Se ocorreu algum erro, retorna OP_ERROR.
+-----------------------------------------------------------------------------*/
+int __inode_read_bytes(DWORD pointer, char *buffer, int size, struct t2fs_inode *inode)
+{
+    BYTE readBuffer[SECTOR_SIZE];
+    DWORD idxBloco = pointer / (g_sb->blockSize * SECTOR_SIZE);
+    DWORD idxSector = ((pointer * sizeof(BYTE)) / SECTOR_SIZE) % g_sb->blockSize;
+    DWORD idxSectorStart = (pointer * sizeof(BYTE)) % SECTOR_SIZE;
+    int idxBuffer = 0;
+    int i, j, k;
+
+    for( k = 0; k <= size / (g_sb->blockSize * SECTOR_SIZE); k++ )
+    {
+        DWORD blockNumber = __block_get_by_idx(idxBloco + k, inode);
+        for( i = idxSector; i < g_sb->blockSize && idxBuffer < size; i++ )
+        {
+            if( read_sector(__block_get_sector(blockNumber) + i, readBuffer) == OP_SUCCESS )
+            {
+                for( j = idxSectorStart; j < SECTOR_SIZE && idxBuffer < size; j++ )
+                {
+                    buffer[idxBuffer] = (char)readBuffer[j];
+                    idxBuffer++;
+                }
+
+                idxSectorStart = 0;
             }
             else
             {
@@ -824,7 +871,7 @@ Saída:
 int __record_write(struct t2fs_record *record, int idxFreeRecord, int blockNumber)
 {
     BYTE buffer[SECTOR_SIZE], *buffer_record = NULL;
-    unsigned int sector = __block_get_sector(blockNumber) + (idxFreeRecord / (SECTOR_SIZE/sizeof(struct t2fs_record)));
+    unsigned int sector = __block_get_sector(blockNumber) + (((idxFreeRecord * sizeof(struct t2fs_record)) / SECTOR_SIZE) % g_sb->blockSize);
     int idxRecord = (idxFreeRecord % (SECTOR_SIZE/sizeof(struct t2fs_record))) * sizeof(struct t2fs_record);
     int i;
 
@@ -872,7 +919,7 @@ int __record_alocate(char *name, int type, struct t2fs_record* parentRecord)
         {
             if( type == TYPEVAL_DIRETORIO )
             {
-                parentInode->bytesFileSize = parentInode->blocksFileSize * SECTOR_SIZE;
+                parentInode->bytesFileSize = parentInode->blocksFileSize * g_sb->blockSize * SECTOR_SIZE;
                 __inode_write(parentInode, parentRecord->inodeNumber);
             }
 
@@ -1140,7 +1187,6 @@ int __record_free(char* name, struct t2fs_record* parentRecord)
     struct t2fs_inode *inode;
     struct t2fs_inode *parentInode = __inode_get_by_idx(parentRecord->inodeNumber);
     struct t2fs_record *record;
-    int i;
     int idxRecord = __record_get_idx_by_name(name, parentInode);
 
     if( idxRecord != OP_ERROR )
@@ -1152,7 +1198,7 @@ int __record_free(char* name, struct t2fs_record* parentRecord)
 
         __record_write(record, idxRecord, __block_navigate(idxRecord, sizeof(struct t2fs_record), parentInode));
 
-        for( i = 0; i < inode->blocksFileSize; i++ )
+        while( inode->blocksFileSize > 0 )
         {
             __block_free(inode, record->inodeNumber);
         }
@@ -1304,7 +1350,7 @@ int __handler_free(int handle, int type)
 {
     HANDLER *handler = NULL;
 
-    if( handle >= 0 )
+    if( handle >= 0 && handle < MAX_NUM_HANDLERS )
     {
         if( type == TYPEVAL_REGULAR || type == TYPEVAL_DIRETORIO )
         {
@@ -1553,37 +1599,24 @@ int read2 (FILE2 handle, char *buffer, int size)
         if( !(g_files[handle].free || g_files[handle].record == NULL) )
         {
             int i;
-            int isEOF = 0;
-            BYTE *readBuffer;
             struct t2fs_inode *inode = __inode_get_by_idx(g_files[handle].record->inodeNumber);
 
-            for( i = 0; i < size && isEOF == 0; i++ )
+            if( __inode_read_bytes(g_files[handle].pointer, buffer, size, inode) != OP_SUCCESS )
             {
-                readBuffer = __entry_read(g_files[handle].pointer, sizeof(BYTE), inode);
+                return OP_ERROR;
+            }
 
-                if( readBuffer != NULL )
-                {
-                    char readChar = (char)*(readBuffer);
+            for( i = 0; i < size; i++ )
+            {
+                g_files[handle].pointer += 1;
 
-                    isEOF = readChar == 0;
-
-                    if( !isEOF )
-                    {
-                        buffer[i] = readChar;
-                        g_files[handle].pointer++;
-                    }
-                    else
-                    {
-                        buffer[i] = '\0';
-                    }
-                }
-                else
+                if( buffer[i] == 0 )
                 {
                     return i;
                 }
             }
 
-            return i;
+            return size;
         }
     }
 
@@ -1618,13 +1651,12 @@ int write2 (FILE2 handle, char *buffer, int size)
         {
             struct t2fs_inode *inode = __inode_get_by_idx(g_files[handle].record->inodeNumber);
 
-            if( (inode->bytesFileSize + size) > (inode->blocksFileSize * SECTOR_SIZE * g_sb->blockSize) )
+            while( (inode->bytesFileSize + size) > (inode->blocksFileSize * SECTOR_SIZE * g_sb->blockSize) )
             {
                 if ( __block_alocate(inode, g_files[handle].record->inodeNumber) != OP_SUCCESS )
                 {
                     return OP_ERROR;
                 }
-
             }
 
             if( __inode_write_bytes(g_files[handle].pointer, buffer, size, inode) != OP_SUCCESS )
@@ -1678,8 +1710,10 @@ int truncate2 (FILE2 handle)
             struct t2fs_inode *inode = __inode_get_by_idx(g_files[handle].record->inodeNumber);
 
             int i;
+            int start = (g_files[handle].pointer / (g_sb->blockSize * SECTOR_SIZE)) + 2;
+            int end = inode->blocksFileSize;
 
-            for( i = (g_files[handle].pointer / (g_sb->blockSize * SECTOR_SIZE)) + 1; i < inode->blocksFileSize; i++ )
+            for( i = start; i <= end; i++ )
             {
                 if( __inode_remove_block(inode, g_files[handle].record->inodeNumber, __block_get_by_idx(i, inode)) != OP_SUCCESS )
                 {

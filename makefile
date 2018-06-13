@@ -26,7 +26,8 @@ gen:
 
 test:
 	$(CC) -o $(EXP_DIR)/teste_dir  $(TST_DIR)/teste_dir.c -L$(LIB_DIR) -lt2fs -Wall
-	#$(CC) $(TST_DIR)/teste_file.c -o $(EXP_DIR)/teste_file -Wall
+	$(CC) -o $(EXP_DIR)/teste_file  $(TST_DIR)/teste_file.c -L$(LIB_DIR) -lt2fs -Wall
+	$(CC) -o $(EXP_DIR)/hexdump  $(TST_DIR)/hexdump.c -Wall
 
 clean:
-	rm -rf $(LIB_DIR)/*.a $(LIB_DIR)/t2fs.o $(LIB_DIR)/parser.o $(SRC_DIR)/*.o $(INC_DIR)/*.o $(EXP_DIR)/teste_dir $(EXP_DIR)/teste_file $(TST_DIR)/*.o
+	rm -rf $(LIB_DIR)/*.a $(LIB_DIR)/t2fs.o $(LIB_DIR)/parser.o $(SRC_DIR)/*.o $(INC_DIR)/*.o $(EXP_DIR)/teste_dir $(EXP_DIR)/teste_file $(EXP_DIR)/hexdump $(TST_DIR)/*.o
