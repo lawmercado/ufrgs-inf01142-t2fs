@@ -1,2 +1,2 @@
-# ufrgs-inf01142-tp2
+# ufrgs-inf01142-t2fs
 Implementation of the T2FS filesystem.
